@@ -6,7 +6,7 @@ import random
 
 st.set_page_config(layout="wide", page_title="決定版・自動シフト作成くん")
 
-st.title("🗓️ シフト作成くん（出張・公休 完全分離版）")
+st.title("🗓️ シフト作成くん（出張・公休 自由自在版）")
 
 # --- 1. スタッフ設定 ---
 st.sidebar.header("1. スタッフ設定")
@@ -42,35 +42,25 @@ for staff in selected_staff:
     target_off_days[staff] = st.sidebar.number_input(f"{staff}の休み希望数", min_value=0, max_value=20, value=8)
 
 # --- 4. 出張と希望休の管理 ---
-if 'trip_df' not in st.session_state or len(st.session_state.trip_df) != len(selected_staff):
+# メンバー変更があったら表を作り直す
+if 'trip_df' not in st.session_state or list(st.session_state.trip_df.index) != selected_staff:
     st.session_state.trip_df = pd.DataFrame(False, index=selected_staff, columns=days)
-if 'fixed_off_df' not in st.session_state or len(st.session_state.fixed_off_df) != len(selected_staff):
+if 'fixed_off_df' not in st.session_state or list(st.session_state.fixed_off_df.index) != selected_staff:
     st.session_state.fixed_off_df = pd.DataFrame(False, index=selected_staff, columns=days)
 
-st.header("📍 ステータス設定")
+st.header("📍 出張 ＆ 希望休の設定")
+st.info("💡 ヒント：表のチェックボックスをクリックした後、右下の小さな四角をマウスで横に引っ張る（ドラッグする）と、エクセルのように一気に連続でチェックを入れられます！")
 
-tabs = st.tabs(["✈️ 出張の設定", "👆 希望休（絶対休み）の設定"])
+tabs = st.tabs(["✈️ 出張のチェック表", "👆 希望休（絶対休み）のチェック表"])
 
 with tabs[0]:
-    st.subheader("出張（仕事だけど不在）の期間入力")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: t_staff = st.selectbox("誰が？", selected_staff, key="t_s")
-    with c2: s_day = st.selectbox("いつから？", days, key="s_d")
-    with c3: e_day = st.selectbox("いつまで？", days, key="e_d")
-    with c4:
-        st.write("")
-        if st.button("出張として登録"):
-            si, ei = days.index(s_day), days.index(e_day)
-            for i in range(si, ei + 1):
-                st.session_state.trip_df.at[t_staff, days[i]] = True
-                st.session_state.fixed_off_df.at[t_staff, days[i]] = False # 休みと重複させない
-            st.rerun()
-    st.write("【現在の出張状況】（チェックが入っている日は出張）")
+    st.subheader("✈️ 出張（仕事だけど不在の日）")
+    st.write("出張などで「シフトに入れない日」にチェックを入れてください。複数人・飛び石も自由自在です！")
     edited_trip = st.data_editor(st.session_state.trip_df, key="trip_editor")
     st.session_state.trip_df = edited_trip
 
 with tabs[1]:
-    st.subheader("希望休（絶対休み）の個別チェック")
+    st.subheader("👆 希望休（絶対に休む日）")
     st.write("「この日は法事」など、出張以外の純粋な休みはここでチェックしてください。")
     edited_off = st.data_editor(st.session_state.fixed_off_df, key="off_editor")
     st.session_state.fixed_off_df = edited_off
@@ -149,7 +139,14 @@ if st.button("✨ シフトを自動作成する", type="primary"):
                 res_df.at[s, day] = "調整"
 
     st.success("シフトが完成しました！")
-    st.dataframe(res_df.style.applymap(lambda x: 'background-color: #ffcccc' if x=='休' else ('background-color: #ccffcc' if x=='出張' else '')))
+    
+    # 色付けして表示
+    def color_cells(val):
+        if val == '休': return 'background-color: #ffcccc'
+        elif val == '出張': return 'background-color: #ccffcc'
+        return ''
+    
+    st.dataframe(res_df.style.applymap(color_cells))
     
     # 統計
     st.subheader("📊 休みと出張の集計（公平性の確認）")
@@ -166,3 +163,13 @@ if st.button("✨ シフトを自動作成する", type="primary"):
 
     csv = res_df.to_csv().encode('utf_8_sig')
     st.download_button("📥 CSVダウンロード", csv, "shift_perfect.csv", "text/csv")
+
+# --- 削除機能 ---
+st.sidebar.markdown("---")
+staff_to_delete = st.sidebar.selectbox("スタッフ削除", ["選択"] + st.session_state.staff_list)
+if st.sidebar.button("削除実行"):
+    if staff_to_delete in st.session_state.staff_list:
+        st.session_state.staff_list.remove(staff_to_delete)
+        if 'trip_df' in st.session_state: del st.session_state.trip_df
+        if 'fixed_off_df' in st.session_state: del st.session_state.fixed_off_df
+        st.rerun()
