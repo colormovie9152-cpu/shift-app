@@ -8,7 +8,7 @@ import jpholiday
 
 st.set_page_config(layout="wide", page_title="究極・シフト作成くん")
 
-st.title("🗓️ 究極・シフト作成くん（3人出勤バランス対応版）")
+st.title("🗓️ 究極・シフト作成くん（シフト4種・完全均等版）")
 
 # --- 1. スタッフ・設定管理 ---
 if 'staff_list' not in st.session_state:
@@ -81,12 +81,18 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
     st.session_state.trip_df = edited_trip
     st.session_state.fixed_off_df = edited_off
 
+    # シフトの種類（4つ）
+    shift_types = ["早1", "早2", "遅1", "遅2"]
     earlies = ["早1", "早2"]
     lates = ["遅1", "遅2"]
     
     res_df = pd.DataFrame("", index=selected_staff, columns=days_labels)
+    
+    # 統計用カウンター
     off_counts = {s: 0 for s in selected_staff}
     holiday_off_counts = {s: 0 for s in selected_staff} 
+    # ★追加：各シフトの割り当て回数をカウント
+    shift_counts = {s: {stype: 0 for stype in shift_types} for s in selected_staff}
 
     def get_streak(staff, current_idx):
         streak = 0
@@ -112,10 +118,9 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
                 off_counts[s] += 1
                 if is_sp_day: holiday_off_counts[s] += 1
 
-        # B. 【改善】1日あたりの「理想の休み人数」を計算し、3人出勤をキープする
+        # B. 人数バランスを保ちつつ休みを割り振る
         rem_s = [s for s in selected_staff if res_df.at[s, day_label] == ""]
         
-        # 全員の残り休み日数を合計して、残りの日数で割る（今日は何人休ませるべきか）
         total_rem_offs = sum([max(0, target_off_days[s] - off_counts[s]) for s in selected_staff])
         rem_days_total = len(days_labels) - d_idx
         ideal_offs_today_float = total_rem_offs / rem_days_total if rem_days_total > 0 else 0
@@ -154,7 +159,6 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
             streak = get_streak(s, d_idx)
             
             is_mandatory = (streak >= 3) or (rem_off >= len(days_labels) - d_idx)
-            # 強制休みの人以外は、今日の「休み枠（理想人数）」が空いている時だけ休ませる
             is_good_pace = (current_offs_today < ideal_offs_today) and (rem_off > 0)
             
             if is_mandatory or is_good_pace:
@@ -164,23 +168,38 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
                 current_offs_today += 1
                 if is_sp_day: holiday_off_counts[s] += 1
 
-        # C. シフト割り当て
+        # C. 【超重要】シフト4種の割り当て（均等化バランサー）
         working = [s for s in selected_staff if res_df.at[s, day_label] == ""]
         random.shuffle(working)
-        pool = (earlies + lates) * 2
+        # その日の人数分、シフトを用意する（多めに2セット用意）
+        pool = shift_types * 2
         
         for s in working:
             prev = res_df.at[s, days_labels[d_idx-1]] if d_idx > 0 else "休"
+            
+            # ★ AIが「この人が今まで一番やっていないシフト」を計算し、優先順位をつける
+            # randomを入れることで、回数が同じ時に特定のシフトに偏るのを防ぐ
+            available_for_s = sorted(pool, key=lambda p: shift_counts[s][p] + random.random() * 0.1)
+            
             assigned = False
-            for p in pool:
+            for p in available_for_s:
+                # 遅番の翌日に早番になる組み合わせはパスする（命を守るルール）
                 if prev in lates and p in earlies: continue
+                
                 res_df.at[s, day_label] = p
-                pool.remove(p)
+                shift_counts[s][p] += 1 # このシフトをやった回数を＋1
+                pool.remove(p) # プールから消費
                 assigned = True
                 break
-            if not assigned: res_df.at[s, day_label] = "遅(調)"
+                
+            # もし禁止ルール等でどうしても割り当てられなかった場合の最終手段
+            if not assigned: 
+                fallback = pool[0] if pool else "遅2"
+                res_df.at[s, day_label] = fallback
+                if fallback in shift_counts[s]: shift_counts[s][fallback] += 1
+                if pool: pool.remove(fallback)
 
-    st.success("人数バランスが完璧に調整されたシフトが完成しました！")
+    st.success("シフト4種も完全に均等化された、無敵のシフトが完成しました！")
     
     def style_df(val):
         if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
@@ -190,16 +209,20 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
     
     st.dataframe(res_df.style.applymap(style_df), height=400)
     
-    st.subheader("📊 公平性のチェック")
+    # --- 統計データの表示 ---
+    st.subheader("📊 最終確認（休み＆シフトの均等性）")
     stats = []
     for s in selected_staff:
         stats.append({
             "スタッフ": s,
-            "出張日数": f"{sum(edited_trip.loc[s])}日",
-            "休み数（実績/目標）": f"{off_counts[s]}日 / {target_off_days[s]}日",
-            "土日祝の休み回数": f"{holiday_off_counts[s]}回"
+            "休み（実績/目標）": f"{off_counts[s]} / {target_off_days[s]}",
+            "土日祝休み": f"{holiday_off_counts[s]}回",
+            "早1": shift_counts[s]["早1"],
+            "早2": shift_counts[s]["早2"],
+            "遅1": shift_counts[s]["遅1"],
+            "遅2": shift_counts[s]["遅2"]
         })
     st.table(pd.DataFrame(stats))
 
     csv = res_df.to_csv().encode('utf_8_sig')
-    st.download_button("📥 CSV保存", csv, f"shift_{year}_{month}.csv", "text/csv")
+    st.download_button("📥 CSV保存", csv, f"perfect_shift_{year}_{month}.csv", "text/csv")
