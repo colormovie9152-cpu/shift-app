@@ -10,8 +10,8 @@ import os
 # --- ロゴの設定 ---
 logo_image = "logo.jpg" 
 
-# --- アプリの設定 ---
-st.set_page_config(layout="wide", page_title="PILATES KASANE - Schedule", page_icon="🧘‍♀️")
+# --- アプリの設定（タイトルを本厚木店に変更！） ---
+st.set_page_config(layout="wide", page_title="KASANE本厚木店シフト管理", page_icon="🧘‍♀️")
 
 # --- 💡オシャレなデザインのCSS適用 ---
 st.markdown("""
@@ -26,6 +26,7 @@ st.markdown("""
     .stHeader h1 { font-size: 1.8rem; color: #5d5d4d; font-weight: 400; letter-spacing: 0.1rem; }
     .css-1d391kg { background-color: #ffffff; border-right: 1px solid #e6e6e6; padding-top: 2rem; }
     .stHeader h2, .stHeader h3, .stHeader h4, .stHeader h5 { color: #5d5d4d; font-weight: 400; margin-top: 1.5rem; }
+    /* チェックボックスを押しやすくする調整 */
     div[data-testid="stDataEditor"] div { cursor: pointer !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -36,7 +37,7 @@ if os.path.exists(logo_image):
     st.image(logo_image)
 else:
     st.markdown("<p style='color:#ccc; font-size:12px;'>※ここにロゴが表示されます</p>", unsafe_allow_html=True)
-st.markdown("<h1>Schedule Management</h1></div>", unsafe_allow_html=True)
+st.markdown("<h1>KASANE本厚木店シフト管理</h1></div>", unsafe_allow_html=True)
 
 # --- 1. スタッフ・設定管理 ---
 if 'staff_list' not in st.session_state:
@@ -97,11 +98,10 @@ for i in range(1, days_in_month + 1):
     
     days_labels.append(label)
 
-# --- 2. 出張・特別休みの設定（完全復活！） ---
+# --- 2. 出張・特別休みの設定 ---
 st.header("2. Business Trip & Special Off-Day Settings")
 st.info("左が『出張（仕事だけど不在）』、右が『希望休（絶対に休む日）』です。")
 
-# 月やメンバーが変わった時に表を作り直すためのキー
 df_key = f"{year}_{month}_{''.join(active_staff)}"
 
 if 'trip_df_dict' not in st.session_state:
@@ -114,19 +114,21 @@ if df_key not in st.session_state.trip_df_dict:
 if df_key not in st.session_state.off_df_dict:
     st.session_state.off_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
 
-# ★出張と休みの2つの表を復活！
+# ★修正ポイント：2回クリックバグを解消！UIの表示のみ行い、即時保存の無限ループを防ぎます。
 col_trip, col_off = st.columns(2)
 with col_trip:
     st.subheader("✈️ 出張 (Business Trip)")
     edited_trip = st.data_editor(st.session_state.trip_df_dict[df_key], key=f"trip_{df_key}")
-    st.session_state.trip_df_dict[df_key] = edited_trip
 with col_off:
     st.subheader("👆 希望休 (Special Off)")
     edited_off = st.data_editor(st.session_state.off_df_dict[df_key], key=f"off_{df_key}")
-    st.session_state.off_df_dict[df_key] = edited_off
 
 # --- 5. シフト作成ロジック ---
 if st.button("Automatically Create Shift", type="primary"):
+    # ★作成ボタンを押した瞬間に、編集内容を保存するように変更！
+    st.session_state.trip_df_dict[df_key] = edited_trip
+    st.session_state.off_df_dict[df_key] = edited_off
+
     shift_types = ["早1", "早2", "遅1", "遅2"]
     earlies = ["早1", "早2"]
     lates = ["遅1", "遅2"]
@@ -149,7 +151,7 @@ if st.button("Automatically Create Shift", type="primary"):
         is_sp_day = is_holiday_list[d_idx] 
         todays_away = []
         
-        # A. 手動設定の反映（出張と休みを別々に処理）
+        # A. 手動設定の反映
         for s in active_staff:
             if edited_trip.at[s, day_label]:
                 res_df.at[s, day_label] = "出張"
@@ -179,7 +181,7 @@ if st.button("Automatically Create Shift", type="primary"):
             streak = get_streak(s, d_idx)
             
             score = 0
-            if streak >= 3: score += 50000 # 3連勤は絶対休ませる！
+            if streak >= 3: score += 50000 
             if rem_off >= rem_days_for_s: score += 10000 
             
             expected_offs = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
@@ -194,7 +196,6 @@ if st.button("Automatically Create Shift", type="primary"):
         candidates.sort(reverse=True)
         
         for score, rand_val, s in candidates:
-            # 💡スタッフが3人以下の時は「最低1人」、4人以上なら「最低2人」を死守
             min_working_staff = 1 if len(active_staff) <= 3 else 2
             if len(active_staff) - len(todays_away) <= min_working_staff: break 
             
@@ -222,7 +223,7 @@ if st.button("Automatically Create Shift", type="primary"):
             
             assigned = False
             for p in available_for_s:
-                if prev in lates and p in earlies: continue # 遅番翌日の早番禁止
+                if prev in lates and p in earlies: continue
                 res_df.at[s, day_label] = p
                 shift_counts[s][p] += 1 
                 pool.remove(p) 
@@ -265,4 +266,4 @@ if st.button("Automatically Create Shift", type="primary"):
     st.table(pd.DataFrame(stats))
 
     csv = res_df.to_csv().encode('utf_8_sig')
-    st.download_button("📥 ダウンロード", csv, f"pilates_shift_{year}_{month}.csv", "text/csv")
+    st.download_button("📥 ダウンロード", csv, f"KASANE_shift_{year}_{month}.csv", "text/csv")
