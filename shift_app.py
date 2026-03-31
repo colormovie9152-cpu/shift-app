@@ -5,70 +5,37 @@ from datetime import datetime, date
 import random
 import math
 import jpholiday
-import os # 🌟エラーを防ぐための新しい部品を追加！
+import os
 
 # --- ロゴの設定 ---
-# GitHubにアップロードする画像の名前に合わせます
 logo_image = "logo.jpg" 
 
 # --- アプリの設定 ---
-st.set_page_config(
-    layout="wide",
-    page_title="PILATES KASANE - Schedule Management",
-    page_icon="🧘‍♀️"
-)
+st.set_page_config(layout="wide", page_title="PILATES KASANE - Schedule", page_icon="🧘‍♀️")
 
 # --- 💡オシャレなデザインのCSS適用 ---
 st.markdown("""
 <style>
-    .stApp {
-        background-color: #fcfcfc;
-        color: #555555;
-    }
+    .stApp { background-color: #fcfcfc; color: #555555; }
     .stHeader {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        background-color: #ffffff;
-        border-bottom: 1px solid #e6e6e6;
-        margin-bottom: 2rem;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding-top: 2rem; padding-bottom: 2rem; background-color: #ffffff;
+        border-bottom: 1px solid #e6e6e6; margin-bottom: 2rem;
     }
-    .stHeader img {
-        max-width: 150px;
-        margin-bottom: 1rem;
-    }
-    .stHeader h1 {
-        font-size: 1.8rem;
-        color: #5d5d4d;
-        font-weight: 400;
-        letter-spacing: 0.1rem;
-    }
-    .css-1d391kg {
-        background-color: #ffffff;
-        border-right: 1px solid #e6e6e6;
-        padding-top: 2rem;
-    }
-    .stHeader h2, .stHeader h3, .stHeader h4, .stHeader h5 {
-        color: #5d5d4d;
-        font-weight: 400;
-        margin-top: 1.5rem;
-    }
-    div[data-testid="stDataEditor"] div {
-        cursor: pointer !important;
-    }
+    .stHeader img { max-width: 150px; margin-bottom: 1rem; }
+    .stHeader h1 { font-size: 1.8rem; color: #5d5d4d; font-weight: 400; letter-spacing: 0.1rem; }
+    .css-1d391kg { background-color: #ffffff; border-right: 1px solid #e6e6e6; padding-top: 2rem; }
+    .stHeader h2, .stHeader h3, .stHeader h4, .stHeader h5 { color: #5d5d4d; font-weight: 400; margin-top: 1.5rem; }
+    div[data-testid="stDataEditor"] div { cursor: pointer !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- ヘッダー（ロゴとタイトル） ---
 st.markdown("<div class='stHeader'>", unsafe_allow_html=True)
-# 🌟画像がGitHubにあるか確認してから表示する安全設計に修正！
 if os.path.exists(logo_image):
     st.image(logo_image)
 else:
-    st.markdown("<p style='color:#ccc; font-size:12px;'>※ここにロゴが表示されます（GitHubに logo.jpg をアップロードしてください）</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#ccc; font-size:12px;'>※ここにロゴが表示されます</p>", unsafe_allow_html=True)
 st.markdown("<h1>Schedule Management</h1></div>", unsafe_allow_html=True)
 
 # --- 1. スタッフ・設定管理 ---
@@ -79,9 +46,6 @@ with st.sidebar:
     st.header("1. Staff & Month Settings")
     st.subheader("Select staff list")
     
-    if 'holiday_data' not in st.session_state:
-        st.session_state.holiday_data = {}
-
     active_staff = []
     for s in st.session_state.staff_list:
         if st.checkbox(s, value=True, key=f"active_{s}"):
@@ -107,9 +71,9 @@ with st.sidebar:
     month = st.selectbox("Month", range(1, 13), index=date.today().month - 1)
 
     st.header("Off Days")
-    extra_off_days = {}
+    target_off_days = {}
     for staff in active_staff:
-        extra_off_days[staff] = st.number_input(f"{staff}の追加休み", min_value=0, max_value=20, value=8)
+        target_off_days[staff] = st.number_input(f"{staff}の休み数", min_value=0, max_value=20, value=8)
 
 # --- カレンダー計算 ---
 days_in_month = calendar.monthrange(year, month)[1]
@@ -133,100 +97,170 @@ for i in range(1, days_in_month + 1):
     
     days_labels.append(label)
 
-# --- 2. 出張・特別休みの設定 ---
+# --- 2. 出張・特別休みの設定（完全復活！） ---
 st.header("2. Business Trip & Special Off-Day Settings")
-st.info("出張は『仕事だけど不在の日』、希望休は『絶対に休む日』としてチェックしてください。")
+st.info("左が『出張（仕事だけど不在）』、右が『希望休（絶対に休む日）』です。")
 
+# 月やメンバーが変わった時に表を作り直すためのキー
 df_key = f"{year}_{month}_{''.join(active_staff)}"
-if 'holiday_df_raw' not in st.session_state:
-    st.session_state.holiday_df_raw = {}
 
-if df_key not in st.session_state.holiday_df_raw:
-    st.session_state.holiday_df_raw[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
+if 'trip_df_dict' not in st.session_state:
+    st.session_state.trip_df_dict = {}
+if 'off_df_dict' not in st.session_state:
+    st.session_state.off_df_dict = {}
 
-edited_raw = st.data_editor(st.session_state.holiday_df_raw[df_key], key=f"editor_{df_key}")
-st.session_state.holiday_df_raw[df_key] = edited_raw
+if df_key not in st.session_state.trip_df_dict:
+    st.session_state.trip_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
+if df_key not in st.session_state.off_df_dict:
+    st.session_state.off_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
+
+# ★出張と休みの2つの表を復活！
+col_trip, col_off = st.columns(2)
+with col_trip:
+    st.subheader("✈️ 出張 (Business Trip)")
+    edited_trip = st.data_editor(st.session_state.trip_df_dict[df_key], key=f"trip_{df_key}")
+    st.session_state.trip_df_dict[df_key] = edited_trip
+with col_off:
+    st.subheader("👆 希望休 (Special Off)")
+    edited_off = st.data_editor(st.session_state.off_df_dict[df_key], key=f"off_{df_key}")
+    st.session_state.off_df_dict[df_key] = edited_off
 
 # --- 5. シフト作成ロジック ---
-if st.button("Automatically Create Shift (Minimum 1 Staff Check Enabled)", type="primary"):
+if st.button("Automatically Create Shift", type="primary"):
+    shift_types = ["早1", "早2", "遅1", "遅2"]
     earlies = ["早1", "早2"]
     lates = ["遅1", "遅2"]
     
     res_df = pd.DataFrame("", index=active_staff, columns=days_labels)
     off_counts = {s: 0 for s in active_staff}
-    weekend_off_counts = {s: 0 for s in active_staff}
-    total_off_target = {}
-    
-    for s in active_staff:
-        fixed_count = sum(edited_raw.loc[s])
-        total_off_target[s] = fixed_count + extra_off_days[s]
+    holiday_off_counts = {s: 0 for s in active_staff}
+    shift_counts = {s: {stype: 0 for stype in shift_types} for s in active_staff}
+
+    def get_streak(staff, current_idx):
+        streak = 0
+        for b in range(1, current_idx + 1):
+            if res_df.at[staff, days_labels[current_idx-b]] != "休":
+                streak += 1
+            else:
+                break
+        return streak
 
     for d_idx, day_label in enumerate(days_labels):
         is_sp_day = is_holiday_list[d_idx] 
-        todays_fixed_off = []
+        todays_away = []
         
+        # A. 手動設定の反映（出張と休みを別々に処理）
         for s in active_staff:
-            if edited_raw.at[s, day_label]:
-                todays_fixed_off.append(s)
+            if edited_trip.at[s, day_label]:
+                res_df.at[s, day_label] = "出張"
+                todays_away.append(s)
+            elif edited_off.at[s, day_label]:
+                res_df.at[s, day_label] = "休"
+                todays_away.append(s)
                 off_counts[s] += 1
-                if is_sp_day: weekend_off_counts[s] += 1
-                res_df.at[s, day_label] = "休" 
+                if is_sp_day: holiday_off_counts[s] += 1
 
-        rem_s = [s for s in active_staff if s not in todays_fixed_off]
-        random.shuffle(rem_s)
-        rem_s.sort(key=lambda s: (weekend_off_counts[s] if is_sp_day else 0, off_counts[s] / total_off_target[s] if total_off_target[s] > 0 else 1.0))
+        # B. 休み人数の調整とペース配分
+        rem_s = [s for s in active_staff if res_df.at[s, day_label] == ""]
         
+        total_rem_offs = sum([max(0, target_off_days[s] - off_counts[s]) for s in active_staff])
+        rem_days_total = len(days_labels) - d_idx
+        ideal_offs_today_float = total_rem_offs / rem_days_total if rem_days_total > 0 else 0
+        ideal_offs_today = math.floor(ideal_offs_today_float)
+        if random.random() < (ideal_offs_today_float - ideal_offs_today):
+            ideal_offs_today += 1
+            
+        current_offs_today = sum([1 for s in todays_away if res_df.at[s, day_label] == "休"])
+        
+        candidates = []
         for s in rem_s:
-            if off_counts[s] < total_off_target[s]:
-                current_away = len(todays_fixed_off) + 1 + sum(edited_raw.loc[:, day_label])
-                
-                # スタッフが3人以下なら最低1人、それ以上なら最低2人を死守
-                min_working_staff = 1 if len(active_staff) <= 3 else 2
+            rem_off = target_off_days[s] - off_counts[s]
+            rem_days_for_s = len(days_labels) - d_idx
+            streak = get_streak(s, d_idx)
+            
+            score = 0
+            if streak >= 3: score += 50000 # 3連勤は絶対休ませる！
+            if rem_off >= rem_days_for_s: score += 10000 
+            
+            expected_offs = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
+            if off_counts[s] < expected_offs: score += 500
+            else: score -= 500
+            
+            if is_sp_day:
+                score += (max(holiday_off_counts.values()) - holiday_off_counts[s]) * 200
+            
+            candidates.append((score, random.random(), s))
+            
+        candidates.sort(reverse=True)
+        
+        for score, rand_val, s in candidates:
+            # 💡スタッフが3人以下の時は「最低1人」、4人以上なら「最低2人」を死守
+            min_working_staff = 1 if len(active_staff) <= 3 else 2
+            if len(active_staff) - len(todays_away) <= min_working_staff: break 
+            
+            rem_off = target_off_days[s] - off_counts[s]
+            streak = get_streak(s, d_idx)
+            
+            is_mandatory = (streak >= 3) or (rem_off >= len(days_labels) - d_idx)
+            is_good_pace = (current_offs_today < ideal_offs_today) and (rem_off > 0)
+            
+            if is_mandatory or is_good_pace:
+                res_df.at[s, day_label] = "休"
+                todays_away.append(s)
+                off_counts[s] += 1
+                current_offs_today += 1
+                if is_sp_day: holiday_off_counts[s] += 1
 
-                if len(active_staff) - current_away >= min_working_staff:
-                    todays_fixed_off.append(s)
-                    off_counts[s] += 1
-                    if is_sp_day: weekend_off_counts[s] += 1
-                    res_df.at[s, day_label] = "休"
-
-        working = [s for s in active_staff if s not in todays_fixed_off]
+        # C. シフト4種の均等割り当て
+        working = [s for s in active_staff if res_df.at[s, day_label] == ""]
         random.shuffle(working)
-        pool = earlies + lates + earlies + lates
+        pool = shift_types * 2
         
         for s in working:
             prev = res_df.at[s, days_labels[d_idx-1]] if d_idx > 0 else "休"
+            available_for_s = sorted(pool, key=lambda p: shift_counts[s][p] + random.random() * 0.1)
+            
             assigned = False
-            for p in pool:
-                if prev in lates and p in earlies: continue
+            for p in available_for_s:
+                if prev in lates and p in earlies: continue # 遅番翌日の早番禁止
                 res_df.at[s, day_label] = p
+                shift_counts[s][p] += 1 
                 pool.remove(p) 
                 assigned = True
                 break
                 
-            if not assigned: res_df.at[s, day_label] = "調整"
+            if not assigned: 
+                fallback = pool[0] if pool else "遅2"
+                res_df.at[s, day_label] = fallback
+                if fallback in shift_counts[s]: shift_counts[s][fallback] += 1
+                if pool: pool.remove(fallback)
 
-    st.success("間隔が調整された綺麗なシフトが完成しました！")
+    st.success("完璧なシフトが完成しました！")
     
     def style_shift(val):
         color = ''
         if val == '休': color = '#ffcccc' 
         elif val == '出張': color = '#ccffcc' 
-        elif val == '調整': color = '#ffffcc' 
         return f'background-color: {color}'
 
-    st.info("💡 この月はスタッフ数が少ないため、現場崩壊を防ぐために『最低1人出勤（ Minimum 1 Staff Check Enabled ）』のルールを適用しました。")
+    if len(active_staff) <= 3:
+        st.info("💡 この月はスタッフ数が少ないため『最低1人出勤』のルールを適用しました。")
+        
     st.dataframe(res_df.style.applymap(style_shift), height=400)
     
-    st.subheader("📊 公平性のチェック")
+    st.subheader("📊 公平性のチェック（シフト4種の均等化）")
     stats = []
     for s in active_staff:
-        trip_days = sum(edited_raw.loc[s])
+        trip_days = sum(edited_trip.loc[s])
         stats.append({
             "スタッフ": s,
-            "出張日数": f"{trip_days}日間",
-            "実際の休み数": f"{off_counts[s]}日間 / 目標{total_off_target[s]}日",
-            "不在の合計": f"{trip_days + off_counts[s]}日間",
-            "土日祝祝日休み": f"{weekend_off_counts[s]}回"
+            "出張日数": f"{trip_days}日",
+            "休み（実績/目標）": f"{off_counts[s]} / {target_off_days[s]}",
+            "土日祝休み": f"{holiday_off_counts[s]}回",
+            "早1": shift_counts[s]["早1"],
+            "早2": shift_counts[s]["早2"],
+            "遅1": shift_counts[s]["遅1"],
+            "遅2": shift_counts[s]["遅2"]
         })
     st.table(pd.DataFrame(stats))
 
