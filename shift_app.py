@@ -6,7 +6,7 @@ import random
 
 st.set_page_config(layout="wide", page_title="プロ仕様・シフト作成くん")
 
-st.title("🗓️ シフト作成くん（3勤1休＆2人出勤死守版）")
+st.title("🗓️ シフト作成くん（完全バランス分散版）")
 
 # --- 1. スタッフ・設定管理 ---
 if 'staff_list' not in st.session_state:
@@ -29,18 +29,15 @@ with st.sidebar:
     st.header("3. 今月の公休（休み）数")
     target_off_days = {}
     for staff in selected_staff:
-        # 出張を除いた純粋な休みの日数
         target_off_days[staff] = st.number_input(f"{staff}の休み数", min_value=0, max_value=20, value=8)
 
 # --- カレンダー計算 ---
 days_in_month = calendar.monthrange(year, month)[1]
 days = [f"{i}日" for i in range(1, days_in_month + 1)]
-# 土日祝の判定
 weekend_indices = [i-1 for i in range(1, days_in_month + 1) if calendar.weekday(year, month, i) >= 5]
 
 # --- 4. 出張と希望休の設定 ---
 st.header("📍 出張・希望休の設定")
-st.info("💡 左側に『出張（仕事）』、右側に『絶対に休み（希望休）』をチェック。設定後、下のボタンを押してください。")
 
 if 'trip_df' not in st.session_state or not st.session_state.trip_df.index.equals(pd.Index(selected_staff)):
     st.session_state.trip_df = pd.DataFrame(False, index=selected_staff, columns=days)
@@ -57,7 +54,6 @@ with col_off:
 
 # --- 5. シフト作成ロジック ---
 if st.button("🚀 この条件でシフトを作成する", type="primary"):
-    # 状態保存
     st.session_state.trip_df = edited_trip
     st.session_state.fixed_off_df = edited_off
 
@@ -68,62 +64,86 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
     off_counts = {s: 0 for s in selected_staff}
     we_off_counts = {s: 0 for s in selected_staff}
 
+    def get_streak(staff, current_d_idx):
+        streak = 0
+        for b in range(1, current_d_idx + 1):
+            if res_df.at[staff, days[current_d_idx-b]] != "休":
+                streak += 1
+            else:
+                break
+        return streak
+
     for d_idx, day in enumerate(days):
         is_we = d_idx in weekend_indices
-        todays_fixed_off = []
-        todays_trip = []
+        todays_away = []
         
-        # A. 手動設定の反映
+        # A. 手動設定（出張・希望休）の反映
         for s in selected_staff:
             if edited_trip.at[s, day]:
                 res_df.at[s, day] = "出張"
-                todays_trip.append(s)
+                todays_away.append(s)
             elif edited_off.at[s, day]:
                 res_df.at[s, day] = "休"
-                todays_fixed_off.append(s)
+                todays_away.append(s)
                 off_counts[s] += 1
                 if is_we: we_off_counts[s] += 1
 
-        # B. 自動休みの割り当て（バランス調整）
-        # まだ休みが決まっていない人を対象に
-        rem_s = [s for s in selected_staff if res_df.at[s, day] == ""]
-        random.shuffle(rem_s)
-        
-        # スコアリング（点数が高い人を優先的に「休み」にする）
-        def get_off_priority(s):
+        # B. 【超重要】ペースメーカーによる休み分散ロジック
+        candidates = []
+        for s in selected_staff:
+            if res_df.at[s, day] != "": continue # すでに予定がある人はスキップ
+            if off_counts[s] >= target_off_days[s]: continue # 休み数に達した人もスキップ
+
+            streak = get_streak(s, d_idx)
+            offs_left = target_off_days[s] - off_counts[s]
+            days_left = days_in_month - d_idx
+            
+            # 今日までに「本来何日休んでいるべきか」の理想ペースを計算
+            expected_offs = ((d_idx + 1) / days_in_month) * target_off_days[s]
+
             score = 0
-            # 1. 土日祝の平等性（これまで土日に休めていない人を優先）
+            
+            # 1. 絶対に休ませる条件（残りの日数が全部休みじゃないと間に合わない時）
+            if offs_left >= days_left:
+                score += 10000
+                
+            # 2. 4連勤以上は強制休み（これ以上は疲労が溜まる）
+            if streak >= 4:
+                score += 5000
+                
+            # 3. ペース配分（ここが前半への偏りを防ぐ最強の盾！）
+            if off_counts[s] < expected_offs:
+                score += 1000 # ペースが遅れているから休んでヨシ
+            else:
+                score -= 1000 # ペースが早いから今は休んじゃダメ！（後半に残す）
+                
+            # 4. 週末の平等性（土日に休めていない人を優先）
             if is_we:
-                score += (max(we_off_counts.values()) - we_off_counts[s]) * 100
-            
-            # 2. 3勤1休のリズム（直近3日働いていたら休み優先度アップ）
-            streak = 0
-            for b in range(1, 4):
-                if d_idx - b >= 0 and res_df.at[s, days[d_idx-b]] != "休":
-                    streak += 1
-            if streak >= 3:
-                score += 50
-            
-            # 3. 休み数が足りない人を優先
-            progress = off_counts[s] / target_off_days[s] if target_off_days[s] > 0 else 1.0
-            score += (1.0 - progress) * 200
-            return score
+                we_diff = max(we_off_counts.values()) - we_off_counts[s]
+                score += we_diff * 100
+                
+            # 5. 連勤の疲労度（働いている日数が長いほど休ませたくなる）
+            if streak >= 2:
+                score += streak * 10
+                
+            candidates.append((score + random.random(), s))
 
-        rem_s.sort(key=get_off_priority, reverse=True)
+        # スコアが高い順（休ませるべき順）に並び替え
+        candidates.sort(reverse=True)
         
-        for s in rem_s:
-            # 目標の休み数に達していなければ休ませる
-            if off_counts[s] < target_off_days[s]:
-                # 「最低2人出勤」を死守するチェック
-                # 全員 - (現在の休み確定 + 今回追加する休み + 今日の出張者) >= 2
-                current_away_total = len(todays_fixed_off) + 1 + len(todays_trip)
-                if len(selected_staff) - current_away_total >= 2:
-                    res_df.at[s, day] = "休"
-                    todays_fixed_off.append(s)
-                    off_counts[s] += 1
-                    if is_we: we_off_counts[s] += 1
+        for score, s in candidates:
+            # スコアがマイナス（＝ペースが早すぎる）場合は、強制条件がない限り休ませない
+            if score < 0: continue 
+            
+            # 常に2人以上の出勤を死守する
+            if len(selected_staff) - len(todays_away) <= 2: break 
+            
+            res_df.at[s, day] = "休"
+            todays_away.append(s)
+            off_counts[s] += 1
+            if is_we: we_off_counts[s] += 1
 
-        # C. シフト割り当て（早番・遅番）
+        # C. 早番・遅番の割り当て
         working = [s for s in selected_staff if res_df.at[s, day] == ""]
         random.shuffle(working)
         shift_pool = (earlies + lates) * 2
@@ -140,9 +160,8 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
             if not assigned: res_df.at[s, day] = "遅(調)"
 
     # --- 結果表示 ---
-    st.success("バランスの取れたシフトが完成しました！")
+    st.success("間隔がバッチリ調整されたシフトが完成しました！")
     
-    # 見やすい色分け
     def style_shift(val):
         if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
@@ -150,8 +169,7 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
     
     st.dataframe(res_df.style.applymap(style_shift), height=400)
     
-    # 統計
-    st.subheader("📊 今月の集計（公平性の確認）")
+    st.subheader("📊 今月の集計（ペースと公平性の確認）")
     stats = []
     for s in selected_staff:
         stats.append({
@@ -164,4 +182,4 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
     st.table(pd.DataFrame(stats))
 
     csv = res_df.to_csv().encode('utf_8_sig')
-    st.download_button("📥 CSVダウンロード", csv, "balanced_shift.csv", "text/csv")
+    st.download_button("📥 CSVダウンロード", csv, "perfect_paced_shift.csv", "text/csv")
