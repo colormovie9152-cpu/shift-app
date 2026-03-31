@@ -86,4 +86,58 @@ if st.button("✨ シフトを自動作成する"):
                     if d_idx - b >= 0 and result_df.at[staff, days[d_idx-b]] != "休":
                         work_count += 1
                 if work_count >= 3:
-                    if len(
+                    if len(selected_staff) - (len(off_today) + 1) >= 2: # 最低2人維持
+                        if staff not in off_today:
+                            off_today.append(staff)
+                            current_off_counts[staff] += 1
+                            if is_weekend: weekend_off_counts[staff] += 1
+
+        # 3. 追加の休みを割り振る（目標に達していない人を優先）
+        remaining_staff = [s for s in selected_staff if s not in off_today]
+        random.shuffle(remaining_staff)
+        # 「土日休みが少ない」かつ「目標休み数に達していない」順に並び替え
+        remaining_staff.sort(key=lambda s: (weekend_off_counts[s] if is_weekend else 0, current_off_counts[s] / total_off_target[s] if total_off_target[s] > 0 else 1))
+
+        for staff in remaining_staff:
+            if current_off_counts[staff] < total_off_target[staff]:
+                if len(selected_staff) - (len(off_today) + 1) >= 2:
+                    off_today.append(staff)
+                    current_off_counts[staff] += 1
+                    if is_weekend: weekend_off_counts[staff] += 1
+
+        # 4. シフトの割り当て
+        working_staff = [s for s in selected_staff if s not in off_today]
+        random.shuffle(working_staff)
+        shift_pool = earlies + lates + earlies + lates
+        
+        for staff in working_staff:
+            prev_shift = result_df.at[staff, days[d_idx-1]] if d_idx > 0 else "休"
+            assigned = False
+            for s_type in shift_pool:
+                if prev_shift in lates and s_type in earlies: continue
+                result_df.at[staff, day] = s_type
+                shift_pool.remove(s_type)
+                assigned = True
+                break
+            if not assigned:
+                result_df.at[staff, day] = "遅(調整)"
+
+    st.success("シフトを作成しました！")
+    st.dataframe(result_df)
+    
+    # 統計情報の表示
+    st.subheader("📊 今月の休み状況（確認用）")
+    summary_data = []
+    for s in selected_staff:
+        fixed = sum(edited_holidays.loc[s])
+        summary_data.append({
+            "スタッフ": s,
+            "出張・希望休(固定)": fixed,
+            "追加の休み": extra_off_days[s],
+            "今月の総休み数": current_off_counts[s],
+            "うち土日の休み": weekend_off_counts[s]
+        })
+    st.table(pd.DataFrame(summary_data))
+
+    csv = result_df.to_csv().encode('utf_8_sig')
+    st.download_button("📥 CSV保存", csv, "shift_v3.csv", "text/csv")
