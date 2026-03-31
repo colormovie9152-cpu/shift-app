@@ -42,12 +42,11 @@ for i in range(1, days_in_month + 1):
 
 # --- イレギュラー設定 ---
 st.header("3. 出張・希望休の設定（チェックした日は出勤しません）")
-st.info("Aさんの出張（15日〜24日）などは、ここでチェックを入れてください。")
-if 'holiday_data' not in st.session_state:
-    st.session_state.holiday_data = pd.DataFrame(False, index=selected_staff, columns=days)
+st.info("Aさんの出張（15日〜24日）や、個別の希望休はここでチェックを入れてください。")
 
-# メンバーが変更された時にデータフレームを更新
-edited_holidays = st.data_editor(pd.DataFrame(False, index=selected_staff, columns=days))
+# ★ここを修正しました！チェックが消えないようにシンプルな状態に戻しています★
+holiday_df = pd.DataFrame(False, index=selected_staff, columns=days)
+edited_holidays = st.data_editor(holiday_df)
 
 # --- シフト作成ロジック ---
 if st.button("✨ シフトを自動作成する"):
@@ -120,7 +119,7 @@ if st.button("✨ シフトを自動作成する"):
                 assigned = True
                 break
             if not assigned:
-                result_df.at[staff, day] = "遅(調整)"
+                result_df.at[staff, day] = "遅(調)"
 
     st.success("シフトを作成しました！")
     st.dataframe(result_df)
@@ -140,4 +139,12 @@ if st.button("✨ シフトを自動作成する"):
     st.table(pd.DataFrame(summary_data))
 
     csv = result_df.to_csv().encode('utf_8_sig')
-    st.download_button("📥 CSV保存", csv, "shift_v3.csv", "text/csv")
+    st.download_button("📥 CSV保存", csv, "shift_v4.csv", "text/csv")
+
+# --- 削除機能 ---
+st.sidebar.markdown("---")
+staff_to_delete = st.sidebar.selectbox("スタッフ削除", ["選択"] + st.session_state.staff_list)
+if st.sidebar.button("削除実行"):
+    if staff_to_delete in st.session_state.staff_list:
+        st.session_state.staff_list.remove(staff_to_delete)
+        st.rerun()
