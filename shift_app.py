@@ -5,6 +5,8 @@ from datetime import datetime, date
 import random
 import math
 import jpholiday
+import os
+import json # 🌟データをファイルに保存するための部品を追加
 
 # --- アプリの設定 ---
 st.set_page_config(layout="wide", page_title="KASANE本厚木店シフト管理", page_icon="🧘‍♀️")
@@ -21,10 +23,25 @@ st.markdown("""
 
 st.title("🗓️ KASANE本厚木店シフト管理")
 
-# --- 1. スタッフ管理（データの永続化） ---
-# セッション内でスタッフリストを保持
+# --- 1. スタッフ管理（データの永続化・保存機能） ---
+STAFF_FILE = "staff_list.json" # 保存するファイルの名前
+
+# ファイルからスタッフリストを読み込む関数
+def load_staff():
+    if os.path.exists(STAFF_FILE):
+        with open(STAFF_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    # ファイルがない場合の初期メンバー
+    # 💡「絶対に消したくない固定メンバー」がいる場合は、ここの名前を直接書き換えるのが一番確実です！
+    return ["スタッフA", "スタッフB", "スタッフC"] 
+
+# ファイルにスタッフリストを保存する関数
+def save_staff(staff_list):
+    with open(STAFF_FILE, "w", encoding="utf-8") as f:
+        json.dump(staff_list, f, ensure_ascii=False)
+
 if 'staff_list' not in st.session_state:
-    st.session_state.staff_list = ["スタッフA", "スタッフB", "スタッフC"]
+    st.session_state.staff_list = load_staff()
 
 with st.sidebar:
     st.header("1. スタッフ・年月設定")
@@ -35,12 +52,14 @@ with st.sidebar:
         if st.button("スタッフを追加"):
             if new_name and new_name not in st.session_state.staff_list:
                 st.session_state.staff_list.append(new_name)
+                save_staff(st.session_state.staff_list) # 🌟ファイルに保存して消えないようにする
                 st.rerun()
         
         del_name = st.selectbox("削除するスタッフ", [""] + st.session_state.staff_list)
         if st.button("スタッフを削除"):
             if del_name in st.session_state.staff_list:
                 st.session_state.staff_list.remove(del_name)
+                save_staff(st.session_state.staff_list) # 🌟ファイルに保存
                 st.rerun()
 
     st.subheader("メンバーの選択")
@@ -94,7 +113,6 @@ if df_key not in st.session_state.trip_df_dict:
     st.session_state.trip_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
 if df_key not in st.session_state.off_df_dict:
     st.session_state.off_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
-# 全員出勤日は1行だけの表にする
 if df_key not in st.session_state.must_work_df_dict:
     st.session_state.must_work_df_dict[df_key] = pd.DataFrame(False, index=["全員出勤にする日"], columns=days_labels)
 
