@@ -5,39 +5,24 @@ from datetime import datetime, date
 import random
 import math
 import jpholiday
-import os
 
-# --- ロゴの設定 ---
-logo_image = "logo.jpg" 
-
-# --- アプリの設定（タイトルを本厚木店に変更！） ---
+# --- アプリの設定 ---
 st.set_page_config(layout="wide", page_title="KASANE本厚木店シフト管理", page_icon="🧘‍♀️")
 
-# --- 💡オシャレなデザインのCSS適用 ---
+# --- 💡オシャレなデザインのCSS適用（無駄なヘッダーの余白を削除） ---
 st.markdown("""
 <style>
     .stApp { background-color: #fcfcfc; color: #555555; }
-    .stHeader {
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        padding-top: 2rem; padding-bottom: 2rem; background-color: #ffffff;
-        border-bottom: 1px solid #e6e6e6; margin-bottom: 2rem;
-    }
-    .stHeader img { max-width: 150px; margin-bottom: 1rem; }
-    .stHeader h1 { font-size: 1.8rem; color: #5d5d4d; font-weight: 400; letter-spacing: 0.1rem; }
     .css-1d391kg { background-color: #ffffff; border-right: 1px solid #e6e6e6; padding-top: 2rem; }
-    .stHeader h2, .stHeader h3, .stHeader h4, .stHeader h5 { color: #5d5d4d; font-weight: 400; margin-top: 1.5rem; }
+    /* タイトルの色調整 */
+    h1, h2, h3, h4, h5 { color: #5d5d4d !important; font-weight: 400 !important; }
     /* チェックボックスを押しやすくする調整 */
     div[data-testid="stDataEditor"] div { cursor: pointer !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- ヘッダー（ロゴとタイトル） ---
-st.markdown("<div class='stHeader'>", unsafe_allow_html=True)
-if os.path.exists(logo_image):
-    st.image(logo_image)
-else:
-    st.markdown("<p style='color:#ccc; font-size:12px;'>※ここにロゴが表示されます</p>", unsafe_allow_html=True)
-st.markdown("<h1>KASANE本厚木店シフト管理</h1></div>", unsafe_allow_html=True)
+# --- タイトル ---
+st.title("🗓️ KASANE本厚木店シフト管理")
 
 # --- 1. スタッフ・設定管理 ---
 if 'staff_list' not in st.session_state:
@@ -114,7 +99,6 @@ if df_key not in st.session_state.trip_df_dict:
 if df_key not in st.session_state.off_df_dict:
     st.session_state.off_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
 
-# ★修正ポイント：2回クリックバグを解消！UIの表示のみ行い、即時保存の無限ループを防ぎます。
 col_trip, col_off = st.columns(2)
 with col_trip:
     st.subheader("✈️ 出張 (Business Trip)")
@@ -125,7 +109,6 @@ with col_off:
 
 # --- 5. シフト作成ロジック ---
 if st.button("Automatically Create Shift", type="primary"):
-    # ★作成ボタンを押した瞬間に、編集内容を保存するように変更！
     st.session_state.trip_df_dict[df_key] = edited_trip
     st.session_state.off_df_dict[df_key] = edited_off
 
