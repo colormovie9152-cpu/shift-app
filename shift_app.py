@@ -57,7 +57,7 @@ for i in range(1, days_in_month + 1):
 # --- 4. 出張と希望休の設定 ---
 st.header("📍 出張・希望休の設定")
 
-# ★ココを修正！「メンバー」か「月（列）」が変わったら表を作り直す！★
+# 月（列）が変わったら表を作り直す
 if 'trip_df' not in st.session_state or \
    not st.session_state.trip_df.index.equals(pd.Index(selected_staff)) or \
    list(st.session_state.trip_df.columns) != days_labels:
@@ -115,7 +115,9 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
         # B. 自動休みの割り振り（分散・連勤防止・公平性）
         rem_s = [s for s in selected_staff if res_df.at[s, day_label] == ""]
         
-        def sort_key(s):
+        # ★エラー原因だった部分を正しく修正しました！★
+        candidates = []
+        for s in rem_s:
             rem_off = target_off_days[s] - off_counts[s]
             rem_days = len(days_labels) - d_idx
             streak = get_streak(s, d_idx)
@@ -133,11 +135,13 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
             if is_sp_day:
                 score += (max(holiday_off_counts.values()) - holiday_off_counts[s]) * 200
             
-            return (score, random.random())
-
-        rem_s.sort(key=sort_key, reverse=True)
+            # 点数、ランダム値、スタッフ名のセットにする
+            candidates.append((score, random.random(), s))
+            
+        # 点数が高い順に並び替え
+        candidates.sort(reverse=True)
         
-        for score, s in rem_s:
+        for score, rand_val, s in candidates:
             # 最低2人出勤ルールを死守（これだけは何があっても優先）
             if len(selected_staff) - len(todays_away) <= 2: break
             
