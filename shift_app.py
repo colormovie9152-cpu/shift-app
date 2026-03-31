@@ -4,9 +4,9 @@ import calendar
 from datetime import datetime
 import random
 
-st.set_page_config(layout="wide", page_title="プロ版・自動シフト作成くん")
+st.set_page_config(layout="wide", page_title="決定版・自動シフト作成くん")
 
-st.title("🗓️ シフト作成くん（出張＆希望休 完璧版）")
+st.title("🗓️ シフト作成くん（出張・公休 完全分離版）")
 
 # --- 1. スタッフ設定 ---
 st.sidebar.header("1. スタッフ設定")
@@ -28,153 +28,141 @@ month = st.sidebar.number_input("月", min_value=1, max_value=12, value=datetime
 days_in_month = calendar.monthrange(year, month)[1]
 days = [f"{i}日" for i in range(1, days_in_month + 1)]
 
-# 土日の判定
+# 土日祝の判定
 weekend_indices = []
 for i in range(1, days_in_month + 1):
     if calendar.weekday(year, month, i) >= 5: # 5=土, 6=日
         weekend_indices.append(i-1)
 
-# --- 3. 休み数の設定 ---
-st.sidebar.header("3. 公休（追加の休み）設定")
-st.sidebar.write("出張や希望休とは「別」に、自動で割り振る休みの日数です。")
-extra_off_days = {}
+# --- 3. 休み日数の設定 ---
+st.sidebar.header("3. 公休（純粋な休み）の日数")
+st.sidebar.write("出張の日数とは『別』に、何日休ませるか設定します。")
+target_off_days = {}
 for staff in selected_staff:
-    extra_off_days[staff] = st.sidebar.number_input(f"{staff}の追加休み", min_value=0, max_value=15, value=4)
+    target_off_days[staff] = st.sidebar.number_input(f"{staff}の休み希望数", min_value=0, max_value=20, value=8)
 
-# --- 4. 絶対休みの入力（出張 ＆ 希望休） ---
-st.header("📍 絶対に休ませる日の設定（出張・希望休）")
+# --- 4. 出張と希望休の管理 ---
+if 'trip_df' not in st.session_state or len(st.session_state.trip_df) != len(selected_staff):
+    st.session_state.trip_df = pd.DataFrame(False, index=selected_staff, columns=days)
+if 'fixed_off_df' not in st.session_state or len(st.session_state.fixed_off_df) != len(selected_staff):
+    st.session_state.fixed_off_df = pd.DataFrame(False, index=selected_staff, columns=days)
 
-# 記憶の保管庫の準備
-if 'holiday_df' not in st.session_state or \
-   len(st.session_state.holiday_df) != len(selected_staff) or \
-   list(st.session_state.holiday_df.index) != selected_staff:
-    st.session_state.holiday_df = pd.DataFrame(False, index=selected_staff, columns=days)
+st.header("📍 ステータス設定")
 
-# --- ✨新機能：出張の一括入力 ---
-st.subheader("✈️ 出張などの「期間」を一括入力")
-st.write("「Aさんは15日〜24日まで出張」などの場合、ここで一気に休みにできます。")
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    trip_staff = st.selectbox("誰が？", selected_staff)
-with col2:
-    start_day = st.selectbox("いつから？", days, index=0)
-with col3:
-    end_day = st.selectbox("いつまで？", days, index=0)
-with col4:
-    st.write("") # ボタンの位置調整
-    if st.button("一括で休みにする"):
-        s_idx = days.index(start_day)
-        e_idx = days.index(end_day)
-        if s_idx <= e_idx:
-            for i in range(s_idx, e_idx + 1):
-                st.session_state.holiday_df.at[trip_staff, days[i]] = True
-            st.rerun() # 画面を更新して表に反映
-        else:
-            st.error("期間が逆になっています！")
+tabs = st.tabs(["✈️ 出張の設定", "👆 希望休（絶対休み）の設定"])
 
-st.markdown("---")
+with tabs[0]:
+    st.subheader("出張（仕事だけど不在）の期間入力")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: t_staff = st.selectbox("誰が？", selected_staff, key="t_s")
+    with c2: s_day = st.selectbox("いつから？", days, key="s_d")
+    with c3: e_day = st.selectbox("いつまで？", days, key="e_d")
+    with c4:
+        st.write("")
+        if st.button("出張として登録"):
+            si, ei = days.index(s_day), days.index(e_day)
+            for i in range(si, ei + 1):
+                st.session_state.trip_df.at[t_staff, days[i]] = True
+                st.session_state.fixed_off_df.at[t_staff, days[i]] = False # 休みと重複させない
+            st.rerun()
+    st.write("【現在の出張状況】（チェックが入っている日は出張）")
+    edited_trip = st.data_editor(st.session_state.trip_df, key="trip_editor")
+    st.session_state.trip_df = edited_trip
 
-# --- 既存のピンポイント入力 ---
-st.subheader("👆 ピンポイントの希望休 ＆ 確認表")
-st.write("上の出張入力で反映されたチェックの確認や、「16日だけ休みたい」といった個別のチェックをポチポチ入力できます。")
-edited_holidays = st.data_editor(st.session_state.holiday_df, key="holiday_editor")
-st.session_state.holiday_df = edited_holidays
+with tabs[1]:
+    st.subheader("希望休（絶対休み）の個別チェック")
+    st.write("「この日は法事」など、出張以外の純粋な休みはここでチェックしてください。")
+    edited_off = st.data_editor(st.session_state.fixed_off_df, key="off_editor")
+    st.session_state.fixed_off_df = edited_off
 
 # --- 5. シフト作成ロジック ---
-if st.button("✨ この設定でシフトを自動作成する", type="primary"):
-    earlies = ["早1(7:30)", "早2(8:30)"]
-    lates = ["遅1(11:30)", "遅2(12:30)"]
+if st.button("✨ シフトを自動作成する", type="primary"):
+    earlies = ["早1", "早2"]
+    lates = ["遅1", "遅2"]
     
-    result_df = pd.DataFrame("休", index=selected_staff, columns=days)
+    # 結果用データフレーム
+    res_df = pd.DataFrame("", index=selected_staff, columns=days)
     
-    current_off_counts = {staff: 0 for staff in selected_staff}
-    weekend_off_counts = {staff: 0 for staff in selected_staff}
-    total_off_target = {}
+    # 統計用
+    off_counts = {s: 0 for s in selected_staff}
+    weekend_off_counts = {s: 0 for s in selected_staff}
     
-    for staff in selected_staff:
-        # 固定休（チェックされた数）＋ サイドバーの追加休み数
-        fixed_count = sum(edited_holidays.loc[staff])
-        total_off_target[staff] = fixed_count + extra_off_days[staff]
-
     for d_idx, day in enumerate(days):
-        is_weekend = d_idx in weekend_indices
-        available_staff = list(selected_staff)
+        is_we = d_idx in weekend_indices
         
-        # A. チェックされた日を確定させる
-        off_today = []
-        for staff in selected_staff:
-            if edited_holidays.at[staff, day]:
-                off_today.append(staff)
-                current_off_counts[staff] += 1
-                if is_weekend: weekend_off_counts[staff] += 1
+        # 1. 状態の確定（出張か、固定休みか）
+        todays_off = []
+        for s in selected_staff:
+            if edited_trip.at[s, day]:
+                res_df.at[s, day] = "出張"
+            elif edited_off.at[s, day]:
+                res_df.at[s, day] = "休"
+                todays_off.append(s)
+                off_counts[s] += 1
+                if is_we: weekend_off_counts[s] += 1
 
-        # B. 4連勤防止（3連勤後は強制休み）
-        for staff in selected_staff:
-            if staff not in off_today:
-                work_count = 0
+        # 2. 4連勤防止ルール（出張も仕事としてカウント）
+        for s in selected_staff:
+            if s not in todays_off and res_df.at[s, day] != "出張":
+                work_streak = 0
                 for b in range(1, 4):
-                    if d_idx - b >= 0 and result_df.at[staff, days[d_idx-b]] != "休":
-                        work_count += 1
-                if work_count >= 3:
-                    if len(selected_staff) - (len(off_today) + 1) >= 2:
-                        off_today.append(staff)
-                        current_off_counts[staff] += 1
-                        if is_weekend: weekend_off_counts[staff] += 1
+                    if d_idx - b >= 0 and res_df.at[s, days[d_idx-b]] != "休":
+                        work_streak += 1
+                if work_streak >= 3:
+                    # 他に2人以上出勤できるなら休ませる
+                    if len(selected_staff) - (len(todays_off) + 1 + sum(edited_trip.loc[:, day])) >= 2:
+                        res_df.at[s, day] = "休"
+                        todays_off.append(s)
+                        off_counts[s] += 1
+                        if is_we: weekend_off_counts[s] += 1
 
-        # C. 公休（追加分）をバランスよく配置
-        remaining_staff = [s for s in selected_staff if s not in off_today]
-        random.shuffle(remaining_staff)
-        remaining_staff.sort(key=lambda s: (weekend_off_counts[s] if is_weekend else 0, current_off_counts[s] / total_off_target[s] if total_off_target[s] > 0 else 1))
-
-        for staff in remaining_staff:
-            if current_off_counts[staff] < total_off_target[staff]:
-                if len(selected_staff) - (len(off_today) + 1) >= 2:
-                    off_today.append(staff)
-                    current_off_counts[staff] += 1
-                    if is_weekend: weekend_off_counts[staff] += 1
-
-        # D. シフト割り当て
-        working_staff = [s for s in selected_staff if s not in off_today]
-        random.shuffle(working_staff)
-        shift_pool = earlies + lates + earlies + lates
+        # 3. 追加の休み（月8日に足りない分）を土日バランス良く割り振る
+        rem_s = [s for s in selected_staff if s not in todays_off and res_df.at[s, day] != "出張"]
+        random.shuffle(rem_s)
+        # 土日休みの公平性と、目標達成率でソート
+        rem_s.sort(key=lambda s: (weekend_off_counts[s] if is_we else 0, off_counts[s] / target_off_days[s] if target_off_days[s]>0 else 1))
         
-        for staff in working_staff:
-            prev_shift = result_df.at[staff, days[d_idx-1]] if d_idx > 0 else "休"
+        for s in rem_s:
+            if off_counts[s] < target_off_days[s]:
+                # 最低2人出勤を維持
+                if len(selected_staff) - (len(todays_off) + 1 + sum(edited_trip.loc[:, day])) >= 2:
+                    res_df.at[s, day] = "休"
+                    todays_off.append(s)
+                    off_counts[s] += 1
+                    if is_we: weekend_off_counts[s] += 1
+
+        # 4. 早番・遅番の割り当て
+        working = [s for s in selected_staff if s not in todays_off and res_df.at[s, day] != "出張"]
+        random.shuffle(working)
+        pool = earlies + lates + earlies + lates
+        
+        for s in working:
+            prev = res_df.at[s, days[d_idx-1]] if d_idx > 0 else "休"
             assigned = False
-            for s_type in shift_pool:
-                if prev_shift in lates and s_type in earlies: continue
-                result_df.at[staff, day] = s_type
-                shift_pool.remove(s_type)
+            for p in pool:
+                if prev in lates and p in earlies: continue # 遅番→早番禁止
+                res_df.at[s, day] = p
+                pool.remove(p)
                 assigned = True
                 break
             if not assigned:
-                result_df.at[staff, day] = "遅(調)"
+                res_df.at[s, day] = "調整"
 
-    st.success("シフトを作成しました！")
-    st.dataframe(result_df)
+    st.success("シフトが完成しました！")
+    st.dataframe(res_df.style.applymap(lambda x: 'background-color: #ffcccc' if x=='休' else ('background-color: #ccffcc' if x=='出張' else '')))
     
     # 統計
-    st.subheader("📊 公平性の確認")
-    summary_list = []
+    st.subheader("📊 休みと出張の集計（公平性の確認）")
+    stats = []
     for s in selected_staff:
-        summary_list.append({
+        stats.append({
             "スタッフ": s,
-            "出張・希望休(チェック数)": sum(edited_holidays.loc[s]),
-            "自動で入れた公休": extra_off_days[s],
-            "実際の合計休み": current_off_counts[s],
-            "土日の休み数": weekend_off_counts[s]
+            "出張日数": sum(edited_trip.loc[s]),
+            "設定した公休日数": target_off_days[s],
+            "実際の公休日数": off_counts[s],
+            "うち土日祝の休み": weekend_off_counts[s]
         })
-    st.table(pd.DataFrame(summary_list))
+    st.table(pd.DataFrame(stats))
 
-    csv = result_df.to_csv().encode('utf_8_sig')
-    st.download_button("📥 CSVダウンロード", csv, "shift_final.csv", "text/csv")
-
-# --- 削除機能 ---
-st.sidebar.markdown("---")
-staff_to_delete = st.sidebar.selectbox("スタッフ削除", ["選択"] + st.session_state.staff_list)
-if st.sidebar.button("削除実行"):
-    if staff_to_delete in st.session_state.staff_list:
-        st.session_state.staff_list.remove(staff_to_delete)
-        if 'holiday_df' in st.session_state:
-            del st.session_state.holiday_df
-        st.rerun()
+    csv = res_df.to_csv().encode('utf_8_sig')
+    st.download_button("📥 CSVダウンロード", csv, "shift_perfect.csv", "text/csv")
