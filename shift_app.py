@@ -57,9 +57,15 @@ for i in range(1, days_in_month + 1):
 # --- 4. 出張と希望休の設定 ---
 st.header("📍 出張・希望休の設定")
 
-if 'trip_df' not in st.session_state or not st.session_state.trip_df.index.equals(pd.Index(selected_staff)):
+# ★ココを修正！「メンバー」か「月（列）」が変わったら表を作り直す！★
+if 'trip_df' not in st.session_state or \
+   not st.session_state.trip_df.index.equals(pd.Index(selected_staff)) or \
+   list(st.session_state.trip_df.columns) != days_labels:
     st.session_state.trip_df = pd.DataFrame(False, index=selected_staff, columns=days_labels)
-if 'fixed_off_df' not in st.session_state or not st.session_state.fixed_off_df.index.equals(pd.Index(selected_staff)):
+
+if 'fixed_off_df' not in st.session_state or \
+   not st.session_state.fixed_off_df.index.equals(pd.Index(selected_staff)) or \
+   list(st.session_state.fixed_off_df.columns) != days_labels:
     st.session_state.fixed_off_df = pd.DataFrame(False, index=selected_staff, columns=days_labels)
 
 col_trip, col_off = st.columns(2)
@@ -116,7 +122,7 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
             expected_offs = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
             
             score = 0
-            if streak >= 3: score += 5000 # 3連勤してたら最優先で休ませる
+            if streak >= 3: score += 50000 # 3連勤してたら最優先（絶対休ませる）
             if rem_off >= rem_days: score += 10000 # 休みを消化しきれなくなりそうなら強制
             
             # ペース配分（前半の休み過ぎを防止）
@@ -132,14 +138,14 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
         rem_s.sort(key=sort_key, reverse=True)
         
         for score, s in rem_s:
-            # 2人出勤を死守
+            # 最低2人出勤ルールを死守（これだけは何があっても優先）
             if len(selected_staff) - len(todays_away) <= 2: break
             
             rem_off = target_off_days[s] - off_counts[s]
             streak = get_streak(s, d_idx)
             
-            # 3連勤していたら、あるいはペース的に休むべきなら休ませる
-            if rem_off > 0 and (streak >= 3 or score > 0):
+            # 「3連勤している（強制）」または「ペース的に休むべき」なら休ませる
+            if streak >= 3 or (rem_off > 0 and score > 0):
                 res_df.at[s, day_label] = "休"
                 todays_away.append(s)
                 off_counts[s] += 1
@@ -154,7 +160,7 @@ if st.button("🚀 この条件でシフトを作成する", type="primary"):
             prev = res_df.at[s, days_labels[d_idx-1]] if d_idx > 0 else "休"
             assigned = False
             for p in pool:
-                if prev in lates and p in earlies: continue
+                if prev in lates and p in earlies: continue # 遅番→早番は禁止
                 res_df.at[s, day_label] = p
                 pool.remove(p)
                 assigned = True
