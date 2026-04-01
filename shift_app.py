@@ -278,15 +278,17 @@ if f"temp_shift_{df_key}" in st.session_state:
     st.success("シフトが完成しました！下の表をダブルクリックすると直接修正できます。")
     st.info("💡 やり直したい場合は、上にある「シフトを自動作成する」をもう一度押すか、ページを更新してください。")
     
-    # 🌟 変更点：「休」の色を上品なダスティーピンク（くすみベージュ・ピンク系）に変更！太字で見やすく！
+    # 🌟🌟🌟 ここが色を変えるための最重要ポイントです！！ 🌟🌟🌟
+    # 背景を可愛いピンク色（#ffe4e1）にし、文字を濃いピンク（#c2185b）にして、!important で強制適用します！
     def style_shift(val):
-        if val == '休': return 'background-color: #f4ecec; color: #8c6b6b; font-weight: bold;'
-        if val == '出張': return 'background-color: #e6fffa; color: #006666;'
+        if val == '休': return 'background-color: #ffe4e1 !important; color: #c2185b !important; font-weight: bold !important;'
+        if val == '出張': return 'background-color: #e0f7fa !important; color: #006064 !important;'
         return ''
     
     temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"])
     temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
     
+    # DataFrameにスタイルを適用して表示
     edited_shift = st.data_editor(
         temp_shift_df.style.applymap(style_shift),
         key=f"temp_shift_editor_{df_key}",
