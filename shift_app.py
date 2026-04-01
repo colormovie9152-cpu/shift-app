@@ -27,13 +27,12 @@ STAFF_FILE = "staff_list.json"
 SCHEDULE_FILE = "schedule_data.json"
 
 # 🌟🌟🌟 【絶対に消えない初期メンバー設定】 🌟🌟🌟
-# アプリがリセットされても、このリストにある名前は必ず復活します！
-# 実際のスタッフの皆様の名前に書き換えてください。
+# ここを実際のスタッフの名前に書き換えて保存してください。
 DEFAULT_STAFF = [
     "石水マリア", 
-    "山崎瑠依", 
-    "恵", 
-    "芽衣子", 
+    "スタッフB", 
+    "スタッフC", 
+    "スタッフD", 
     "スタッフE"
 ]
 
@@ -66,8 +65,41 @@ if 'staff_list' not in st.session_state:
 if 'sched_data' not in st.session_state:
     st.session_state.sched_data = load_schedule_data()
 
-# --- サイドバー設定 ---
+# --- 🌟 新機能：バックアップと復元 ---
 with st.sidebar:
+    st.header("💾 設定のバックアップと復元")
+    st.write("サーバーのリセットでチェックが消えても、これがあれば一瞬で復元できます。")
+    
+    # ダウンロード
+    all_data = {
+        "staff": st.session_state.staff_list,
+        "sched": st.session_state.sched_data
+    }
+    json_str = json.dumps(all_data, ensure_ascii=False, indent=2)
+    st.download_button(
+        label="📥 今の設定をファイルに保存",
+        data=json_str,
+        file_name=f"KASANE_settings_backup.json",
+        mime="application/json",
+        use_container_width=True
+    )
+
+    # アップロード
+    uploaded_file = st.file_uploader("📤 保存した設定ファイルを読み込む", type="json")
+    if uploaded_file is not None:
+        try:
+            backup = json.load(uploaded_file)
+            st.session_state.staff_list = backup["staff"]
+            st.session_state.sched_data = backup["sched"]
+            save_staff(st.session_state.staff_list)
+            save_schedule_data(st.session_state.sched_data)
+            st.success("✅ 設定を復元しました！ページを更新してください。")
+            if st.button("今すぐ反映（リロード）"):
+                st.rerun()
+        except:
+            st.error("ファイルが正しくありません。")
+
+    st.markdown("---")
     st.header("1. スタッフ・年月設定")
     with st.expander("スタッフの追加・削除"):
         new_name = st.text_input("追加する名前")
@@ -158,7 +190,7 @@ with col_btn1:
         st.session_state.sched_data[df_key]["off"] = edited_off.to_dict()
         st.session_state.sched_data[df_key]["must"] = edited_must_work.to_dict()
         save_schedule_data(st.session_state.sched_data)
-        st.success("👍 チェック内容を記憶しました！")
+        st.success("👍 チェック内容を一時記憶しました！確実に残すには左の『ファイルに保存』も使ってください。")
 
 with col_btn2:
     if st.button("🗑️ 記憶をリセット（白紙に戻す）", use_container_width=True):
@@ -176,12 +208,24 @@ with col_btn3:
 # --- 5. 本物のAIエンジン（平等強制版） ---
 if create_clicked:
     num_days = len(days_labels)
-    
+    schedule = {s: [""] * num_days for s in active_staff}
     fixed_manual = {s: [False]*num_days for s in active_staff}
     for s in active_staff:
         for d in range(num_days):
-            if edited_trip.at[s, days_labels[d]]: fixed_manual[s][d] = True
-            elif edited_off.at[s, days_labels[d]]: fixed_manual[s][d] = True
+            if edited_trip.at[s, days_labels[d]]: 
+                schedule[s][d] = "出張"
+                fixed_manual[s][d] = True
+            elif edited_off.at[s, days_labels[d]]: 
+                schedule[s][d] = "休"
+                fixed_manual[s][d] = True
+
+    for s in active_staff:
+        current_offs = sum(1 for d in range(num_days) if schedule[s][d] == "休")
+        needed_offs = target_off_days[s] - current_offs
+        empty_days = [d for d in range(num_days) if schedule[s][d] == ""]
+        if needed_offs > 0:
+            for d in random.sample(empty_days, min(needed_offs, len(empty_days))):
+                schedule[s][d] = "休"
 
     must_work_arr = [edited_must_work.at["全員出勤にする日", days_labels[d]] for d in range(num_days)]
     is_sp_arr = is_holiday_list
@@ -189,290 +233,152 @@ if create_clicked:
 
     def get_penalty(sched):
         penalty = 0
-        
-        # 【絶対ルール1】お店の最低人数 (10,000,000,000)
         for d in range(num_days):
             working = sum(1 for s in active_staff if sched[s][d] == "") 
-            if working < min_s_arr[d]: 
-                penalty += (min_s_arr[d] - working) * 10000000000 
+            if working < min_s_arr[d]: penalty += (min_s_arr[d] - working) * 10000000000 
             if must_work_arr[d]:
                 non_trip = sum(1 for s in active_staff if sched[s][d] != "出張")
                 if working < non_trip: penalty += (non_trip - working) * 10000000000
 
-        # 【絶対ルール2】連勤・連休
-        manager_fours = 0
         normal_fours = []
-
         for s in active_staff:
-            current_work = 0
-            current_off = 0
-            four_day_streaks = 0
-
+            current_work, current_off, four_streaks = 0, 0, 0
             for d in range(num_days):
                 val = sched[s][d]
                 if val in ["休", "出張"]:
-                    if current_work == 4:
-                        four_day_streaks += 1
-                    elif current_work >= 5:
-                        penalty += current_work * 10000000000 # 5連勤以上は絶対禁止(100億点)
-                    
+                    if current_work == 4: four_streaks += 1
+                    elif current_work >= 5: penalty += 10000000000
                     current_work = 0
                     if val == "休": current_off += 1
-                    else: current_off = 0 
-                else: 
-                    if current_off >= 3:
-                        penalty += current_off * 10000000000 # 3連休以上は絶対禁止(100億点)
-                    current_off = 0
-                    current_work += 1
+                    else: current_off = 0
+                else:
+                    if current_off >= 3: penalty += 10000000000
+                    current_off, current_work = 0, current_work + 1
+            if current_work == 4: four_streaks += 1
+            elif current_work >= 5: penalty += 10000000000
+            if current_off >= 3: penalty += 10000000000
 
-            if current_work == 4:
-                four_day_streaks += 1
-            elif current_work >= 5:
-                penalty += current_work * 10000000000
-            if current_off >= 3:
-                penalty += current_off * 10000000000
-
-            # 回数の振り分け
-            if s == manager_staff:
-                manager_fours = four_day_streaks
+            if s != manager_staff:
+                normal_fours.append(four_streaks)
             else:
-                normal_fours.append(four_day_streaks)
+                # 指定した人の4連勤はむしろ歓迎（ペナルティなし）
+                pass
 
-        # 🌟🌟🌟【完全平等＆店長優先システム】🌟🌟🌟
         if normal_fours:
-            f_max = max(normal_fours)
-            f_min = min(normal_fours)
-            diff = f_max - f_min
-            
-            # 一般スタッフ間で4連勤の回数が違うのは「絶対悪」（ペナルティ1億点）
-            penalty += diff * 100000000 
-            
-            # 一般スタッフ全体の4連勤回数（店長に押し付けるための微小ペナルティ1万点）
-            penalty += sum(normal_fours) * 10000 
+            # 🌟 平等ルール：一般スタッフ間の回数差は絶対許さない
+            penalty += (max(normal_fours) - min(normal_fours)) * 1000000000
+            # 指定外に4連勤があること自体を嫌がるようにし、店長へ誘導する
+            penalty += sum(normal_fours) * 100000 
 
         return penalty
 
     best_overall_schedule = None
     best_overall_penalty = float('inf')
 
-    # AIの思考プロセス
-    with st.spinner('AIが「4連勤は店長優先、他スタッフは全員平等」の最強ルールでパズルを解いています...（約3秒）'):
-        for attempt in range(5): 
-            if best_overall_penalty == 0: break 
-            
-            current_schedule = {s: [""] * num_days for s in active_staff}
-            for s in active_staff:
-                for d in range(num_days):
-                    if edited_trip.at[s, days_labels[d]]: current_schedule[s][d] = "出張"
-                    elif edited_off.at[s, days_labels[d]]: current_schedule[s][d] = "休"
-                
-                current_offs = sum(1 for d in range(num_days) if current_schedule[s][d] == "休")
-                needed_offs = target_off_days[s] - current_offs
-                empty_days = [d for d in range(num_days) if current_schedule[s][d] == ""]
-                
-                if needed_offs > 0:
-                    step = len(empty_days) / needed_offs
-                    for i in range(needed_offs):
-                        idx = int(i * step + step / 2)
-                        if idx >= len(empty_days): idx = len(empty_days) - 1
-                        current_schedule[s][empty_days[idx]] = "休"
-            
-            local_penalty = get_penalty(current_schedule)
-            local_best_schedule = {s: current_schedule[s][:] for s in active_staff}
-            local_best_penalty = local_penalty
+    with st.spinner('AIが計算中...'):
+        for attempt in range(5):
+            if best_overall_penalty == 0: break
+            current_sched = {s: schedule[s][:] for s in active_staff}
+            curr_p = get_penalty(current_sched)
+            local_best_s = {s: current_sched[s][:] for s in active_staff}
+            local_best_p = curr_p
+            T = 100.0
+            for i in range(25000):
+                if local_best_p == 0: break
+                s1 = random.choice(active_staff)
+                s1_offs = [d for d in range(num_days) if current_sched[s1][d] == "休" and not fixed_manual[s1][d]]
+                s1_works = [d for d in range(num_days) if current_sched[s1][d] == "" and not fixed_manual[s1][d]]
+                if s1_offs and s1_works:
+                    d1, d2 = random.choice(s1_offs), random.choice(s1_works)
+                    current_sched[s1][d1], current_sched[s1][d2] = "", "休"
+                    new_p = get_penalty(current_sched)
+                    if new_p <= curr_p or random.random() < math.exp((curr_p - new_p) / max(T, 0.1)):
+                        curr_p = new_p
+                        if new_p < local_best_p:
+                            local_best_p, local_best_s = new_p, {s: current_sched[s][:] for s in active_staff}
+                    else:
+                        current_sched[s1][d1], current_sched[s1][d2] = "休", ""
+                T *= 0.9995
+            if local_best_p < best_overall_penalty:
+                best_overall_penalty, best_overall_schedule = local_best_p, local_best_s
 
-            T = 100.0 
-            cooling_rate = 0.9995 
-
-            for i in range(20000): 
-                if local_best_penalty == 0: break 
-
-                mutation = random.random()
-                
-                if mutation < 0.5:
-                    s1 = random.choice(active_staff)
-                    s1_offs = [d for d in range(num_days) if current_schedule[s1][d] == "休" and not fixed_manual[s1][d]]
-                    s1_works = [d for d in range(num_days) if current_schedule[s1][d] == "" and not fixed_manual[s1][d]]
-                    
-                    if s1_offs and s1_works:
-                        d1, d2 = random.choice(s1_offs), random.choice(s1_works)
-                        current_schedule[s1][d1], current_schedule[s1][d2] = "", "休"
-                        
-                        new_penalty = get_penalty(current_schedule)
-                        if new_penalty <= local_penalty or random.random() < math.exp((local_penalty - new_penalty) / max(T, 0.1)):
-                            local_penalty = new_penalty
-                            if new_penalty < local_best_penalty:
-                                local_best_penalty = new_penalty
-                                local_best_schedule = {s: current_schedule[s][:] for s in active_staff}
-                        else:
-                            current_schedule[s1][d1], current_schedule[s1][d2] = "休", "" 
-                
-                else:
-                    if len(active_staff) < 2: continue
-                    s1, s2 = random.sample(active_staff, 2)
-                    
-                    s1_off_s2_work = [d for d in range(num_days) if current_schedule[s1][d] == "休" and current_schedule[s2][d] == "" and not fixed_manual[s1][d] and not fixed_manual[s2][d]]
-                    s1_work_s2_off = [d for d in range(num_days) if current_schedule[s1][d] == "" and current_schedule[s2][d] == "休" and not fixed_manual[s1][d] and not fixed_manual[s2][d]]
-                    
-                    if s1_off_s2_work and s1_work_s2_off:
-                        d1 = random.choice(s1_off_s2_work)
-                        d2 = random.choice(s1_work_s2_off)
-                        
-                        current_schedule[s1][d1], current_schedule[s2][d1] = "", "休"
-                        current_schedule[s1][d2], current_schedule[s2][d2] = "休", ""
-                        
-                        new_penalty = get_penalty(current_schedule)
-                        if new_penalty <= local_penalty or random.random() < math.exp((local_penalty - new_penalty) / max(T, 0.1)):
-                            local_penalty = new_penalty
-                            if new_penalty < local_best_penalty:
-                                local_best_penalty = new_penalty
-                                local_best_schedule = {s: current_schedule[s][:] for s in active_staff}
-                        else:
-                            current_schedule[s1][d1], current_schedule[s2][d1] = "休", ""
-                            current_schedule[s1][d2], current_schedule[s2][d2] = "", "休"
-
-                T *= cooling_rate
-                
-            if local_best_penalty < best_overall_penalty:
-                best_overall_penalty = local_best_penalty
-                best_overall_schedule = {s: local_best_schedule[s][:] for s in active_staff}
-
-    # 早番・遅番の割り振り
     res_df = pd.DataFrame.from_dict(best_overall_schedule, orient='index', columns=days_labels)
-    
+    # 早番・遅番割り振り
     shift_types = ["早1", "早2", "遅1", "遅2"]
-    earlies, lates = ["早1", "早2"], ["遅1", "遅2"]
     shift_counts = {s: {stype: 0 for stype in shift_types} for s in active_staff}
-
     for d_idx, day_label in enumerate(days_labels):
-        working_staff = [s for s in active_staff if res_df.at[s, day_label] == ""]
-        random.shuffle(working_staff)
-        pool = shift_types * 3 
-        
-        for s in working_staff:
+        working = [s for s in active_staff if res_df.at[s, day_label] == ""]
+        random.shuffle(working)
+        pool = shift_types * 3
+        for s in working:
             prev = res_df.at[s, days_labels[d_idx-1]] if d_idx > 0 else "休"
             available = sorted(pool, key=lambda p: shift_counts[s][p] + random.random() * 0.1)
-            
             assigned = False
             for p in available:
-                if prev in lates and p in earlies: continue
-                res_df.at[s, day_label] = p
-                shift_counts[s][p] += 1 
-                pool.remove(p) 
-                assigned = True
+                if prev in ["遅1", "遅2"] and p in ["早1", "早2"]: continue
+                res_df.at[s, day_label], assigned = p, True
+                shift_counts[s][p] += 1
+                pool.remove(p)
                 break
             if not assigned:
-                fallback = pool[0] if pool else "遅2"
-                res_df.at[s, day_label] = fallback
-                if fallback in shift_counts[s]: shift_counts[s][fallback] += 1
-                if pool: pool.remove(fallback)
+                res_df.at[s, day_label] = pool[0] if pool else "遅2"
 
     st.session_state[f"temp_shift_{df_key}"] = res_df.to_dict()
     st.session_state[f"best_penalty_{df_key}"] = best_overall_penalty
 
 # ==========================================
-# 🌟 完成したシフトの表示＆微調整（色付き）
+# 🌟 表示エリア
 # ==========================================
 if f"temp_shift_{df_key}" in st.session_state:
-    
     def style_shift(val):
-        val_str = str(val)
-        if val_str == '休': return 'background-color: #ffb6c1; color: #555555; font-weight: bold;'
-        if val_str == '出張': return 'background-color: #e0ffff; color: #555555;'
-        if '早' in val_str: return 'background-color: #fffac8; color: #555555;'
-        if '遅' in val_str: return 'background-color: #d0ebff; color: #555555;'
+        if val == '休': return 'background-color: #ffb6c1; color: #555555; font-weight: bold;'
+        if val == '出張': return 'background-color: #e0ffff; color: #555555;'
+        if '早' in str(val): return 'background-color: #fffac8; color: #555555;'
+        if '遅' in str(val): return 'background-color: #d0ebff; color: #555555;'
         return ''
     
-    temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"])
-    temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
+    temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"]).reindex(index=active_staff, columns=days_labels, fill_value="")
     
-    # 🌟🌟🌟 結果に応じたメッセージの表示 🌟🌟🌟
-    stats_for_msg = []
-    m_fours = 0
-    normal_fours_list = []
-    
+    # メッセージ判定
+    m_fours, normal_fours_list = 0, []
     for s in active_staff:
-        streak = 0
-        four_streaks = 0
+        streak, fours = 0, 0
         for d in days_labels:
             if temp_shift_df.at[s, d] in ["休", "出張"]:
-                if streak == 4: four_streaks += 1
+                if streak == 4: fours += 1
                 streak = 0
-            else:
-                streak += 1
-        if streak == 4: four_streaks += 1
-        
-        if s == manager_staff:
-            m_fours = four_streaks
-        else:
-            normal_fours_list.append(four_streaks)
+            else: streak += 1
+        if streak == 4: fours += 1
+        if s == manager_staff: m_fours = fours
+        else: normal_fours_list.append(fours)
 
     best_p = st.session_state.get(f"best_penalty_{df_key}", 0)
-    
-    if best_p >= 10000000000:
-        st.error("🚨 【限界突破エラー】希望休や出張が多すぎて、どうしても5連勤や3連休を回避できません！左の表のチェックを見直してください。")
-    elif best_p >= 100000000:
-        st.error("🚨 【警告】希望休の被りなどの影響で、一般スタッフの4連勤を完全に平等にすることができませんでした。")
-    elif sum(normal_fours_list) > 0:
-        val = normal_fours_list[0]
-        st.warning(f"⚠️ 指定した人だけではカバーしきれなかったため、一般スタッフ【全員に平等に {val}回ずつ】4連勤を割り振りました！")
-    elif m_fours > 0:
-        st.info(f"💡 一般スタッフの4連勤は0回です！ {manager_staff} さんが4連勤を優先して {m_fours}回 引き受けてカバーしました。")
-    else:
-        st.success("✨ 全員の4連勤が0回の、最高に平和なシフトです！休み日数も完全に守られています。")
+    if best_p >= 100000000: st.error("🚨 ルールを守りきれませんでした。希望休を調整してください。")
+    elif sum(normal_fours_list) > 0: st.warning(f"⚠️ 一般スタッフも全員平等に {normal_fours_list[0]}回 4連勤となりました。")
+    elif m_fours > 0: st.info(f"💡 {manager_staff}さんが4連勤を引き受けてくれました！")
+    else: st.success("✨ 全員4連勤なしの完璧なシフトです！")
 
-    st.subheader("👀 シフト確認用（完全色付きマップ）")
-    colored_map_area = st.empty()
-
-    st.subheader("✏️ シフト微調整用（ここで直接書き換えできます）")
-    edited_shift = st.data_editor(
-        temp_shift_df,
-        key=f"temp_shift_editor_{df_key}",
-        height=300
-    )
+    st.subheader("👀 確認用（色付き）")
+    st.dataframe(temp_shift_df.style.applymap(style_shift), height=300, use_container_width=True)
     
-    if hasattr(edited_shift.style, 'map'):
-        styled_df = edited_shift.style.map(style_shift)
-    else:
-        styled_df = edited_shift.style.applymap(style_shift)
-        
-    colored_map_area.dataframe(styled_df, height=300, use_container_width=True)
+    st.subheader("✏️ 微調整用（直接編集OK）")
+    edited_shift = st.data_editor(temp_shift_df, key=f"temp_shift_editor_{df_key}", height=300)
     
-    st.subheader("📊 最終実績の確認（微調整も反映されます）")
+    st.subheader("📊 最終実績")
     stats = []
     for s in active_staff:
-        off_c = sum(edited_shift.loc[s] == "休")
-        trip_c = sum(edited_shift.loc[s] == "出張")
-        hol_off_c = sum(1 for d_idx, day_label in enumerate(days_labels) if is_holiday_list[d_idx] and edited_shift.at[s, day_label] == "休")
-                
-        e1 = sum(edited_shift.loc[s] == "早1")
-        e2 = sum(edited_shift.loc[s] == "早2")
-        l1 = sum(edited_shift.loc[s] == "遅1")
-        l2 = sum(edited_shift.loc[s] == "遅2")
-
-        streak = 0
-        four_streaks = 0
-        five_streaks = 0
+        streak, f4, f5 = 0, 0, 0
         for d in days_labels:
             if edited_shift.at[s, d] in ["休", "出張"]:
-                if streak == 4: four_streaks += 1
-                elif streak >= 5: five_streaks += 1
+                if streak == 4: f4 += 1
+                elif streak >= 5: f5 += 1
                 streak = 0
-            else:
-                streak += 1
-        if streak == 4: four_streaks += 1
-        elif streak >= 5: five_streaks += 1
-
+            else: streak += 1
+        if streak == 4: f4 += 1
+        elif streak >= 5: f5 += 1
         stats.append({
-            "スタッフ": s, 
-            "休み(実/目)": f"{off_c}/{target_off_days[s]}", 
-            "土日祝休": hol_off_c, 
-            "早1": e1, "早2": e2, "遅1": l1, "遅2": l2,
-            "4連勤": f"{four_streaks}回",
-            "5連勤以上": f"{five_streaks}回"
+            "スタッフ": s, "休み(実/目)": f"{sum(edited_shift.loc[s]=='休')}/{target_off_days[s]}",
+            "4連勤": f"{f4}回", "5連勤以上": f"{f5}回"
         })
-        
     st.table(pd.DataFrame(stats))
-
-    csv = edited_shift.to_csv().encode('utf_8_sig')
-    st.download_button("📥 完成したシフトをダウンロード", csv, f"KASANE_shift_{year}_{month}.csv", "text/csv")
+    st.download_button("📥 シフトをCSVで保存", edited_shift.to_csv().encode('utf_8_sig'), f"shift_{year}_{month}.csv", "text/csv")
