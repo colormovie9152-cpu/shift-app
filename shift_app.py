@@ -132,27 +132,39 @@ with col2:
     edited_off = st.data_editor(off_df, key=f"off_{df_key}")
 
 # ==========================================
-# 🌟 【新機能】任意でチェック内容を記憶させるボタン
+# 🌟 【新機能】記憶・リセット・作成の3連ボタン
 # ==========================================
 st.markdown("---")
 st.subheader("💾 予定の記憶とシフト作成")
-st.write("チェックした内容を記憶させておけば、やり直す時に最初から入力する手間が省けます。")
+st.write("チェックした内容を記憶させたり、白紙に戻したりできます。")
 
-col_btn1, col_btn2 = st.columns(2)
+col_btn1, col_btn2, col_btn3 = st.columns(3)
 
 with col_btn1:
-    if st.button("💾 今のチェック状態をベースとして記憶する"):
+    if st.button("💾 今のチェックを記憶する", use_container_width=True):
         if df_key not in st.session_state.sched_data:
             st.session_state.sched_data[df_key] = {}
         st.session_state.sched_data[df_key]["trip"] = edited_trip.to_dict()
         st.session_state.sched_data[df_key]["off"] = edited_off.to_dict()
         st.session_state.sched_data[df_key]["must"] = edited_must_work.to_dict()
         save_schedule_data(st.session_state.sched_data)
-        st.success("👍 チェック内容を記憶しました！画面を更新してもこの状態からスタートできます。")
+        st.success("👍 チェック内容を記憶しました！")
+
+# 🌟 追加：記憶を解除して白紙に戻すボタン
+with col_btn2:
+    if st.button("🗑️ 記憶をリセット（白紙に戻す）", use_container_width=True):
+        # 保存データを削除
+        if df_key in st.session_state.sched_data:
+            del st.session_state.sched_data[df_key]
+            save_schedule_data(st.session_state.sched_data)
+        # 画面の表示用データも削除
+        if f"temp_shift_{df_key}" in st.session_state:
+            del st.session_state[f"temp_shift_{df_key}"]
+        st.rerun()
 
 # --- 5. シフト作成ロジック ---
-with col_btn2:
-    create_clicked = st.button("🚀 画面の設定でシフトを自動作成する", type="primary")
+with col_btn3:
+    create_clicked = st.button("🚀 シフトを自動作成する", type="primary", use_container_width=True)
 
 if create_clicked:
     shift_types = ["早1", "早2", "遅1", "遅2"]
@@ -260,7 +272,6 @@ if create_clicked:
                 if fallback in shift_counts[s]: shift_counts[s][fallback] += 1
                 if pool: pool.remove(fallback)
 
-    # 🌟 作成した結果は一時的にセッションに保存（ファイルには書き込まないので、リロードで消えます）
     st.session_state[f"temp_shift_{df_key}"] = res_df.to_dict()
 
 # ==========================================
@@ -270,8 +281,9 @@ if f"temp_shift_{df_key}" in st.session_state:
     st.success("シフトが完成しました！下の表をダブルクリックすると直接修正できます。")
     st.info("💡 やり直したい場合は、上にある「シフトを自動作成する」をもう一度押すか、ページを更新してください。")
     
+    # 🌟 変更点：「休」の色を主張しすぎないオシャレなグレーに変更！
     def style_shift(val):
-        if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
+        if val == '休': return 'background-color: #e8e6e1; color: #888888;' # KASANEに合わせたシックなグレー
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
         return ''
     
