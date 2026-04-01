@@ -26,13 +26,24 @@ st.title("🗓️ KASANE本厚木店シフト管理")
 STAFF_FILE = "staff_list.json"
 SCHEDULE_FILE = "schedule_data.json"
 
+# 🌟🌟🌟 【絶対に消えない初期メンバー設定】 🌟🌟🌟
+# アプリがリセットされても、このリストにある名前は必ず復活します！
+# 実際のスタッフの皆様の名前に書き換えてください。
+DEFAULT_STAFF = [
+    "石水マリア", 
+    "スタッフB", 
+    "スタッフC", 
+    "スタッフD", 
+    "スタッフE"
+]
+
 def load_staff():
     if os.path.exists(STAFF_FILE):
         try:
             with open(STAFF_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except: pass
-    return ["スタッフA", "スタッフB", "スタッフC"]
+    return DEFAULT_STAFF.copy()
 
 def save_staff(staff_list):
     with open(STAFF_FILE, "w", encoding="utf-8") as f:
@@ -227,7 +238,7 @@ if create_clicked:
             else:
                 normal_fours.append(four_day_streaks)
 
-        # 🌟🌟🌟【今回の最重要ロック】4連勤の平等化＆店長優先 🌟🌟🌟
+        # 🌟🌟🌟【完全平等＆店長優先システム】🌟🌟🌟
         if normal_fours:
             f_max = max(normal_fours)
             f_min = min(normal_fours)
