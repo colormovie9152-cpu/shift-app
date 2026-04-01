@@ -271,33 +271,48 @@ if create_clicked:
     st.session_state[f"temp_shift_{df_key}"] = res_df.to_dict()
 
 # ==========================================
-# 🌟 完成したシフトの表示＆微調整
+# 🌟 完成したシフトの表示＆微調整（バグ回避の2段構成！）
 # ==========================================
 if f"temp_shift_{df_key}" in st.session_state:
-    st.success("シフトが完成しました！下の表をダブルクリックすると直接修正できます。")
+    st.success("シフトが完成しました！")
     
-    # 🌟🌟 修正ポイント：文字色（テキストカラー）の指定を完全に削除し、マスの背景色だけをピンクに塗る！ 🌟🌟
+    # 🌟 背景色を塗るためのルール（全シフトをわかりやすく色分け！）
     def style_shift(val):
-        if val == '休': 
-            return 'background-color: #ffb6c1;' # 背景をわかりやすいピンク色に！
-        if val == '出張': 
-            return 'background-color: #e0ffff;' # 出張はわかりやすい水色に！
+        val_str = str(val)
+        if val_str == '休': return 'background-color: #ffb6c1; color: #555555; font-weight: bold;' # 濃いめのピンク
+        if val_str == '出張': return 'background-color: #e0ffff; color: #555555;' # 水色
+        if '早' in val_str: return 'background-color: #fffac8; color: #555555;' # 薄い黄色（早番）
+        if '遅' in val_str: return 'background-color: #d0ebff; color: #555555;' # 薄い青色（遅番）
         return ''
     
+    # セッションからデータを読み込む
     temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"])
     temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
     
-    # pandasのバージョンによって色が弾かれないようにする安全対策
-    if hasattr(temp_shift_df.style, 'map'):
-        styled_df = temp_shift_df.style.map(style_shift)
-    else:
-        styled_df = temp_shift_df.style.applymap(style_shift)
+    # 🌟 【絶対に色が消えない】確認専用の色付きマップを上部に配置
+    st.subheader("👀 シフト確認用（完全色付きマップ）")
+    st.write("※連勤のカタマリがパッと見で分かるように、休み(ピンク)・早番(黄)・遅番(青)でマスの色を分けています！")
     
+    # 表示専用のエリア（プレースホルダー）を確保
+    colored_map_area = st.empty()
+
+    st.subheader("✏️ シフト微調整用（ここで直接書き換えできます）")
+    st.write("※下の表で「早1」などを書き換えると、上の色付きマップも一瞬で連動して書き換わります！")
+    
+    # 書き換え用データエディタ（ここで編集した内容が即座に反映される）
     edited_shift = st.data_editor(
-        styled_df,
+        temp_shift_df,
         key=f"temp_shift_editor_{df_key}",
-        height=400
+        height=300
     )
+    
+    # 🌟 編集後のデータに色を塗って、上のプレースホルダーに表示する！
+    if hasattr(edited_shift.style, 'map'):
+        styled_df = edited_shift.style.map(style_shift)
+    else:
+        styled_df = edited_shift.style.applymap(style_shift)
+        
+    colored_map_area.dataframe(styled_df, height=300, use_container_width=True)
     
     # 統計の再計算
     st.subheader("📊 最終実績の確認（微調整も反映されます）")
