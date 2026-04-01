@@ -136,7 +136,6 @@ with col2:
 # ==========================================
 st.markdown("---")
 st.subheader("💾 予定の記憶とシフト作成")
-st.write("チェックした内容を記憶させたり、白紙に戻したりできます。")
 
 col_btn1, col_btn2, col_btn3 = st.columns(3)
 
@@ -276,21 +275,27 @@ if create_clicked:
 # ==========================================
 if f"temp_shift_{df_key}" in st.session_state:
     st.success("シフトが完成しました！下の表をダブルクリックすると直接修正できます。")
-    st.info("💡 やり直したい場合は、上にある「シフトを自動作成する」をもう一度押すか、ページを更新してください。")
     
-    # 🌟🌟🌟 ここが色を変えるための最重要ポイントです！！ 🌟🌟🌟
-    # 背景を可愛いピンク色（#ffe4e1）にし、文字を濃いピンク（#c2185b）にして、!important で強制適用します！
+    # 🌟🌟 修正ポイント：システムがエラーを起こさない、最高にシンプルな色の命令！ 🌟🌟
     def style_shift(val):
-        if val == '休': return 'background-color: #ffe4e1 !important; color: #c2185b !important; font-weight: bold !important;'
-        if val == '出張': return 'background-color: #e0f7fa !important; color: #006064 !important;'
+        if val == '休': 
+            # 余計な命令(font-weightや!important)をすべて削除し、純粋な色だけを指定！
+            return 'background-color: #FFC0CB; color: #B22222;' 
+        if val == '出張': 
+            return 'background-color: #E0FFFF; color: #008080;'
         return ''
     
     temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"])
     temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
     
-    # DataFrameにスタイルを適用して表示
+    # pandasのバージョンによって色が弾かれないようにする安全対策
+    try:
+        styled_df = temp_shift_df.style.map(style_shift)
+    except AttributeError:
+        styled_df = temp_shift_df.style.applymap(style_shift)
+    
     edited_shift = st.data_editor(
-        temp_shift_df.style.applymap(style_shift),
+        styled_df,
         key=f"temp_shift_editor_{df_key}",
         height=400
     )
