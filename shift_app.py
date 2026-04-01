@@ -136,13 +136,20 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
     holiday_off_counts = {s: 0 for s in active_staff}
     shift_counts = {s: {stype: 0 for stype in shift_types} for s in active_staff}
 
-    # 連勤数をカウントする関数（出張も仕事に含む）
+    # 連勤数をカウント
     def get_streak(staff, current_idx):
         streak = 0
         for b in range(1, current_idx + 1):
             cell = res_df.at[staff, days_labels[current_idx-b]]
-            if cell != "休" and cell != "":
-                streak += 1
+            if cell != "休" and cell != "": streak += 1
+            else: break
+        return streak
+
+    # 連休数をカウント
+    def get_off_streak(staff, current_idx):
+        streak = 0
+        for b in range(1, current_idx + 1):
+            if res_df.at[staff, days_labels[current_idx-b]] == "休": streak += 1
             else: break
         return streak
 
@@ -166,7 +173,6 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
         if not is_must_work:
             rem_s = [s for s in active_staff if res_df.at[s, day_label] == ""]
             
-            # 今日休ませるべき「理想の枠」を計算
             total_rem_offs = sum([max(0, target_off_days[s] - off_counts[s]) for s in active_staff])
             rem_days_total = len(days_labels) - d_idx
             ideal_offs_today_float = total_rem_offs / rem_days_total if rem_days_total > 0 else 0
@@ -178,29 +184,42 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
             for s in rem_s:
                 rem_off = target_off_days[s] - off_counts[s]
                 streak = get_streak(s, d_idx)
+                off_streak = get_off_streak(s, d_idx)
                 
                 score = 0
-                # 🌟 連勤ストッパー：4連勤（5日目）は絶対に阻止するスコア
-                if streak >= 4: score += 1000000 
-                # 🌟 3連勤（4日目）は通常NGとして強力に休みを促す
-                elif streak == 3: score += 100000
+                # 連勤ストッパー（超強力）
+                if streak >= 5: score += 2000000 # 6連勤阻止
+                elif streak == 4: score += 1000000 # 5連勤阻止
+                elif streak == 3: score += 500000 # 4連勤阻止（通常はここで休ませる）
                 
-                if rem_off >= (len(days_labels) - d_idx): score += 10000 
+                # 連休ストッパー（休みを散らばせるためのペナルティ）
+                # 昨日休んでいた場合、今日「自動で」休ませる優先順位を下げる
+                if off_streak >= 1: score -= 300000 
+                
+                # 残り休み数に対する緊急度
+                if rem_off >= (len(days_labels) - d_idx): score += 100000 
+                
+                # 理想のペース
                 expected = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
-                score += 500 if off_counts[s] < expected else -500
-                if is_sp_day: score += (max(holiday_off_counts.values()) - holiday_off_counts[s]) * 200
+                score += 5000 if off_counts[s] < expected else -5000
+                
+                if is_sp_day:
+                    score += (max(holiday_off_counts.values()) - holiday_off_counts[s]) * 2000
+                
                 candidates.append((score, random.random(), s))
                 
             candidates.sort(reverse=True)
             for score, rand_val, s in candidates:
                 min_staff = 1 if len(active_staff) <= 3 else 2
-                # 最低人数を割り込む場合、4連勤以下なら出勤させる（5連勤以上は極力避ける）
+                
+                # 最低人数チェック
                 if len(active_staff) - len(todays_away) <= min_staff:
-                    if score < 1000000: break # 5連勤阻止以外は最低人数優先
+                    if score < 500000: break # 緊急連勤阻止以外は出勤優先
                 
                 rem_off = target_off_days[s] - off_counts[s]
-                # 強制休み、または理想の休み人数枠が空いている場合に休ませる
-                if score >= 100000 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
+                
+                # 強制休み条件、または理想枠に空きがある場合に休ませる
+                if score >= 500000 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
                     res_df.at[s, day_label] = "休"
                     todays_away.append(s)
                     off_counts[s] += 1
@@ -221,7 +240,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 pool.remove(p) 
                 break
 
-    st.success("連勤を抑制したシフトが完成しました！")
+    st.success("連勤と連休のバランスを最適化したシフトが完成しました！")
     def style_shift(val):
         if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
