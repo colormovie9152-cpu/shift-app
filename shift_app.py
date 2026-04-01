@@ -22,11 +22,10 @@ st.markdown("""
 
 st.title("🗓️ KASANE本厚木店シフト管理")
 
-# --- 1. データの完全保存システム（アップデートしても消えない！） ---
+# --- 1. データの完全保存システム ---
 STAFF_FILE = "staff_list.json"
 SCHEDULE_FILE = "schedule_data.json"
 
-# スタッフリストの読み込み・保存
 def load_staff():
     if os.path.exists(STAFF_FILE):
         try:
@@ -39,7 +38,6 @@ def save_staff(staff_list):
     with open(STAFF_FILE, "w", encoding="utf-8") as f:
         json.dump(staff_list, f, ensure_ascii=False)
 
-# チェック表（出張・休みなど）の読み込み・保存
 def load_schedule_data():
     if os.path.exists(SCHEDULE_FILE):
         try:
@@ -52,7 +50,6 @@ def save_schedule_data(data_dict):
     with open(SCHEDULE_FILE, "w", encoding="utf-8") as f:
         json.dump(data_dict, f, ensure_ascii=False)
 
-# 初期読み込み
 if 'staff_list' not in st.session_state:
     st.session_state.staff_list = load_staff()
 if 'sched_data' not in st.session_state:
@@ -103,21 +100,18 @@ for i in range(1, days_in_month + 1):
         label += f" ※{holiday_name}"
         is_holiday_list.append(True)
     else:
-        is_holiday_list.append(curr_date.weekday() >= 5) # 土日をTrueに
+        is_holiday_list.append(curr_date.weekday() >= 5) 
     days_labels.append(label)
 
-# --- 2. 各種予定の設定（消えないチェック表） ---
+# --- 2. 各種予定の設定 ---
 st.header("2. 各種予定の設定")
-st.info("💡 入力した内容は自動的に保存され、アプリを更新しても消えなくなりました！")
+st.info("💡 チェックを入れた瞬間に自動保存されます！間違えて画面を戻っても消えません。")
 
 df_key = f"{year}_{month}"
 
-# JSONから表を復元する強力な関数
 def get_persisted_df(domain, index_list, columns):
     if df_key in st.session_state.sched_data and domain in st.session_state.sched_data[df_key]:
-        # 保存されているデータを読み込む
         saved_df = pd.DataFrame(st.session_state.sched_data[df_key][domain])
-        # 現在のスタッフリストと日付に合わせて形を整える（はみ出た部分は消え、足りない部分はFalseで埋まる）
         saved_df = saved_df.reindex(index=index_list, columns=columns, fill_value=False)
         return saved_df.fillna(False).astype(bool)
     else:
@@ -138,17 +132,18 @@ with col2:
     st.subheader("👆 希望休（絶対休み）")
     edited_off = st.data_editor(off_df, key=f"off_{df_key}")
 
-# --- 5. シフト作成ロジック ---
-if st.button("🚀 シフトを自動作成する", type="primary"):
-    
-    # 🌟 ボタンを押した瞬間に、現在のチェック状態をJSONに完全保存！
-    if df_key not in st.session_state.sched_data:
-        st.session_state.sched_data[df_key] = {}
-    st.session_state.sched_data[df_key]["trip"] = edited_trip.to_dict()
-    st.session_state.sched_data[df_key]["off"] = edited_off.to_dict()
-    st.session_state.sched_data[df_key]["must"] = edited_must_work.to_dict()
-    save_schedule_data(st.session_state.sched_data)
+# 🌟 【ここが超重要】入力した瞬間にオートセーブ（これで絶対に白紙になりません！）
+if df_key not in st.session_state.sched_data:
+    st.session_state.sched_data[df_key] = {}
+st.session_state.sched_data[df_key]["trip"] = edited_trip.to_dict()
+st.session_state.sched_data[df_key]["off"] = edited_off.to_dict()
+st.session_state.sched_data[df_key]["must"] = edited_must_work.to_dict()
+save_schedule_data(st.session_state.sched_data)
 
+# --- 5. シフト作成ロジック ---
+st.warning("⚠️ 新しく『自動作成』を押すと、AIがイチからパズルを組み直すため、一番下の表で手作業で微調整した内容はリセットされます。微調整は最後に行うのがおすすめです！")
+
+if st.button("🚀 シフトを自動作成する", type="primary"):
     shift_types = ["早1", "早2", "遅1", "遅2"]
     earlies, lates = ["早1", "早2"], ["遅1", "遅2"]
     
@@ -177,13 +172,8 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
         is_must_work = edited_must_work.at["全員出勤にする日", day_label]
         todays_away = []
         
-        # 【超重要】その日に最低限必要な出勤人数を定義
-        if is_sp_day:
-            min_staff = 2 # 土日祝は絶対に2人以上！
-        else:
-            min_staff = 1 if len(active_staff) <= 3 else 2 # 平日はスタッフ数に応じて変動
+        min_staff = 2 if is_sp_day else (1 if len(active_staff) <= 3 else 2)
 
-        # A. 手動設定の反映
         for s in active_staff:
             if edited_trip.at[s, day_label]:
                 res_df.at[s, day_label] = "出張"
@@ -192,9 +182,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 res_df.at[s, day_label] = "休"
                 todays_away.append(s)
                 off_counts[s] += 1
-                if is_sp_day: holiday_off_counts[s] += 1
 
-        # B. 自動休みの割り振り
         if not is_must_work:
             rem_s = [s for s in active_staff if res_df.at[s, day_label] == ""]
             
@@ -222,16 +210,11 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 expected = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
                 score += 5000 if off_counts[s] < expected else -5000
                 
-                if is_sp_day:
-                    score += (max(holiday_off_counts.values()) - holiday_off_counts[s]) * 2000
-                
                 candidates.append((score, random.random(), s))
                 
             candidates.sort(reverse=True)
             for score, rand_val, s in candidates:
-                # 🚨 【絶対防壁】もしこの人を休ませて最低人数を割ってしまうなら、絶対に休ませない！
-                if len(active_staff) - len(todays_away) - 1 < min_staff:
-                    continue # 強制的に次の候補者へ（誰も休めない場合はそのままスルー）
+                if len(active_staff) - len(todays_away) - 1 < min_staff: continue 
                 
                 rem_off = target_off_days[s] - off_counts[s]
                 if score >= 500000 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
@@ -239,9 +222,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                     todays_away.append(s)
                     off_counts[s] += 1
                     current_offs_today += 1
-                    if is_sp_day: holiday_off_counts[s] += 1
 
-        # C. シフト割り当て
         working = [s for s in active_staff if res_df.at[s, day_label] == ""]
         random.shuffle(working)
         pool = shift_types * 2
@@ -257,26 +238,62 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 pool.remove(p) 
                 assigned = True
                 break
-            
-            # 安全装置：プールが空になった場合でも必ず割り当てる
             if not assigned:
                 fallback = pool[0] if pool else "遅2"
                 res_df.at[s, day_label] = fallback
                 if fallback in shift_counts[s]: shift_counts[s][fallback] += 1
                 if pool: pool.remove(fallback)
 
-    st.success("完璧に守られたシフトが完成しました！")
+    # 生成したシフト結果もファイルに保存！
+    st.session_state.sched_data[df_key]["final_shift"] = res_df.to_dict()
+    save_schedule_data(st.session_state.sched_data)
+
+# ==========================================
+# 🌟 完成したシフトの表示＆微調整オートセーブ機能
+# ==========================================
+if df_key in st.session_state.sched_data and "final_shift" in st.session_state.sched_data[df_key]:
+    st.success("シフトが保存されています！下の表をダブルクリックすると直接修正できます。")
+    st.info("💡 手入力で書き換えると、自動で保存され、集計表もリアルタイムで再計算されます！")
+    
     def style_shift(val):
         if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
         return ''
-    st.dataframe(res_df.style.applymap(style_shift), height=400)
     
-    st.subheader("📊 実績の確認")
+    saved_shift_df = pd.DataFrame(st.session_state.sched_data[df_key]["final_shift"])
+    saved_shift_df = saved_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
+    
+    edited_shift = st.data_editor(
+        saved_shift_df.style.applymap(style_shift),
+        key=f"final_shift_editor_{df_key}",
+        height=400
+    )
+    
+    # 手入力で書き換えた内容も上書き保存（オートセーブ）
+    st.session_state.sched_data[df_key]["final_shift"] = edited_shift.to_dict()
+    save_schedule_data(st.session_state.sched_data)
+    
+    # 統計の再計算
+    st.subheader("📊 最終実績の確認（微調整も反映されます）")
     stats = []
     for s in active_staff:
-        stats.append({"スタッフ": s, "休み(実/目)": f"{off_counts[s]}/{target_off_days[s]}", "土日祝休": holiday_off_counts[s], "早1": shift_counts[s]["早1"], "早2": shift_counts[s]["早2"], "遅1": shift_counts[s]["遅1"], "遅2": shift_counts[s]["遅2"]})
+        off_c = sum(edited_shift.loc[s] == "休")
+        trip_c = sum(edited_shift.loc[s] == "出張")
+        hol_off_c = sum(1 for d_idx, day_label in enumerate(days_labels) if is_holiday_list[d_idx] and edited_shift.at[s, day_label] == "休")
+                
+        e1 = sum(edited_shift.loc[s] == "早1")
+        e2 = sum(edited_shift.loc[s] == "早2")
+        l1 = sum(edited_shift.loc[s] == "遅1")
+        l2 = sum(edited_shift.loc[s] == "遅2")
+
+        stats.append({
+            "スタッフ": s, 
+            "休み(実/目)": f"{off_c}/{target_off_days[s]}", 
+            "土日祝休": hol_off_c, 
+            "早1": e1, "早2": e2, "遅1": l1, "遅2": l2
+        })
+        
     st.table(pd.DataFrame(stats))
 
-    csv = res_df.to_csv().encode('utf_8_sig')
-    st.download_button("📥 CSVダウンロード", csv, f"KASANE_shift_{year}_{month}.csv", "text/csv")
+    csv = edited_shift.to_csv().encode('utf_8_sig')
+    st.download_button("📥 完成したシフトをダウンロード", csv, f"KASANE_shift_{year}_{month}.csv", "text/csv")
