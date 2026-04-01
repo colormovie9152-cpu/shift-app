@@ -276,22 +276,21 @@ if create_clicked:
 if f"temp_shift_{df_key}" in st.session_state:
     st.success("シフトが完成しました！下の表をダブルクリックすると直接修正できます。")
     
-    # 🌟🌟 修正ポイント：システムがエラーを起こさない、最高にシンプルな色の命令！ 🌟🌟
+    # 🌟🌟 修正ポイント：文字色（テキストカラー）の指定を完全に削除し、マスの背景色だけをピンクに塗る！ 🌟🌟
     def style_shift(val):
         if val == '休': 
-            # 余計な命令(font-weightや!important)をすべて削除し、純粋な色だけを指定！
-            return 'background-color: #FFC0CB; color: #B22222;' 
+            return 'background-color: #ffb6c1;' # 背景をわかりやすいピンク色に！
         if val == '出張': 
-            return 'background-color: #E0FFFF; color: #008080;'
+            return 'background-color: #e0ffff;' # 出張はわかりやすい水色に！
         return ''
     
     temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"])
     temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
     
     # pandasのバージョンによって色が弾かれないようにする安全対策
-    try:
+    if hasattr(temp_shift_df.style, 'map'):
         styled_df = temp_shift_df.style.map(style_shift)
-    except AttributeError:
+    else:
         styled_df = temp_shift_df.style.applymap(style_shift)
     
     edited_shift = st.data_editor(
