@@ -22,7 +22,7 @@ st.markdown("""
 
 st.title("🗓️ KASANE本厚木店シフト管理")
 
-# --- 1. スタッフ管理（データの保存機能） ---
+# --- 1. スタッフ管理 ---
 STAFF_FILE = "staff_list.json"
 
 def load_staff():
@@ -30,8 +30,7 @@ def load_staff():
         try:
             with open(STAFF_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            pass
+        except: pass
     return ["スタッフA", "スタッフB", "スタッフC"]
 
 def save_staff(staff_list):
@@ -43,7 +42,6 @@ if 'staff_list' not in st.session_state:
 
 with st.sidebar:
     st.header("1. スタッフ・年月設定")
-    
     with st.expander("スタッフの追加・削除"):
         new_name = st.text_input("追加する名前")
         if st.button("スタッフを追加"):
@@ -51,7 +49,6 @@ with st.sidebar:
                 st.session_state.staff_list.append(new_name)
                 save_staff(st.session_state.staff_list)
                 st.rerun()
-        
         del_name = st.selectbox("削除するスタッフ", [""] + st.session_state.staff_list)
         if st.button("スタッフを削除"):
             if del_name in st.session_state.staff_list:
@@ -59,13 +56,11 @@ with st.sidebar:
                 save_staff(st.session_state.staff_list)
                 st.rerun()
 
-    st.subheader("メンバーの選択")
     active_staff = []
     for s in st.session_state.staff_list:
         if st.checkbox(s, value=True, key=f"active_{s}"):
             active_staff.append(s)
 
-    st.header("年月の設定")
     year = st.selectbox("年", range(date.today().year - 1, date.today().year + 3), index=1)
     month = st.selectbox("月", range(1, 13), index=date.today().month - 1)
 
@@ -92,29 +87,23 @@ for i in range(1, days_in_month + 1):
         is_holiday_list.append(curr_date.weekday() >= 5)
     days_labels.append(label)
 
-# --- 2. 各種予定の設定（データの引き継ぎ機能を強化） ---
+# --- 2. 各種予定の設定 ---
 st.header("2. 各種予定の設定")
-st.info("チェックを入れた内容は、シフト作成ボタンを押すまで保持されます。")
-
-# 合鍵（キー）からスタッフ名を外し、年月だけにします
 df_key = f"{year}_{month}"
 
 if 'trip_df_dict' not in st.session_state: st.session_state.trip_df_dict = {}
 if 'off_df_dict' not in st.session_state: st.session_state.off_df_dict = {}
 if 'must_work_df_dict' not in st.session_state: st.session_state.must_work_df_dict = {}
 
-# データフレームの初期化・更新（スタッフが増減しても既存のチェックを壊さない）
 def get_updated_df(storage_dict, key, current_staff, columns, is_single_row=False):
     if key not in storage_dict:
         index = ["全員出勤にする日"] if is_single_row else current_staff
         storage_dict[key] = pd.DataFrame(False, index=index, columns=columns)
     else:
-        # すでにある表の列（日付）が違う場合は作り直し
         if list(storage_dict[key].columns) != columns:
             index = ["全員出勤にする日"] if is_single_row else current_staff
             storage_dict[key] = pd.DataFrame(False, index=index, columns=columns)
         elif not is_single_row:
-            # スタッフの増減に合わせて行だけを更新（既存のチェックは維持！）
             storage_dict[key] = storage_dict[key].reindex(index=current_staff, fill_value=False)
     return storage_dict[key]
 
@@ -122,7 +111,7 @@ trip_df = get_updated_df(st.session_state.trip_df_dict, df_key, active_staff, da
 off_df = get_updated_df(st.session_state.off_df_dict, df_key, active_staff, days_labels)
 must_work_df = get_updated_df(st.session_state.must_work_df_dict, df_key, active_staff, days_labels, is_single_row=True)
 
-st.subheader("🏢 全員出勤日の指定（ここをチェックした日は誰も自動で休みになりません）")
+st.subheader("🏢 全員出勤日の指定")
 edited_must_work = st.data_editor(must_work_df, key=f"must_{df_key}")
 
 col1, col2 = st.columns(2)
@@ -135,7 +124,6 @@ with col2:
 
 # --- 5. シフト作成ロジック ---
 if st.button("🚀 シフトを自動作成する", type="primary"):
-    # 編集内容を保存
     st.session_state.trip_df_dict[df_key] = edited_trip
     st.session_state.off_df_dict[df_key] = edited_off
     st.session_state.must_work_df_dict[df_key] = edited_must_work
@@ -148,10 +136,12 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
     holiday_off_counts = {s: 0 for s in active_staff}
     shift_counts = {s: {stype: 0 for stype in shift_types} for s in active_staff}
 
+    # 連勤数をカウントする関数（出張も仕事に含む）
     def get_streak(staff, current_idx):
         streak = 0
         for b in range(1, current_idx + 1):
-            if res_df.at[staff, days_labels[current_idx-b]] != "休":
+            cell = res_df.at[staff, days_labels[current_idx-b]]
+            if cell != "休" and cell != "":
                 streak += 1
             else: break
         return streak
@@ -172,23 +162,29 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 off_counts[s] += 1
                 if is_sp_day: holiday_off_counts[s] += 1
 
-        # B. 休み人数の調整（全員出勤日なら自動休みをスキップ）
+        # B. 休み人数の調整
         if not is_must_work:
             rem_s = [s for s in active_staff if res_df.at[s, day_label] == ""]
+            
+            # 今日休ませるべき「理想の枠」を計算
             total_rem_offs = sum([max(0, target_off_days[s] - off_counts[s]) for s in active_staff])
             rem_days_total = len(days_labels) - d_idx
             ideal_offs_today_float = total_rem_offs / rem_days_total if rem_days_total > 0 else 0
             ideal_offs_today = math.floor(ideal_offs_today_float)
             if random.random() < (ideal_offs_today_float - ideal_offs_today): ideal_offs_today += 1
-            
             current_offs_today = sum([1 for s in todays_away if res_df.at[s, day_label] == "休"])
             
             candidates = []
             for s in rem_s:
                 rem_off = target_off_days[s] - off_counts[s]
                 streak = get_streak(s, d_idx)
+                
                 score = 0
-                if streak >= 3: score += 50000 
+                # 🌟 連勤ストッパー：4連勤（5日目）は絶対に阻止するスコア
+                if streak >= 4: score += 1000000 
+                # 🌟 3連勤（4日目）は通常NGとして強力に休みを促す
+                elif streak == 3: score += 100000
+                
                 if rem_off >= (len(days_labels) - d_idx): score += 10000 
                 expected = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
                 score += 500 if off_counts[s] < expected else -500
@@ -198,10 +194,13 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
             candidates.sort(reverse=True)
             for score, rand_val, s in candidates:
                 min_staff = 1 if len(active_staff) <= 3 else 2
-                if len(active_staff) - len(todays_away) <= min_staff: break 
+                # 最低人数を割り込む場合、4連勤以下なら出勤させる（5連勤以上は極力避ける）
+                if len(active_staff) - len(todays_away) <= min_staff:
+                    if score < 1000000: break # 5連勤阻止以外は最低人数優先
                 
                 rem_off = target_off_days[s] - off_counts[s]
-                if streak >= 3 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
+                # 強制休み、または理想の休み人数枠が空いている場合に休ませる
+                if score >= 100000 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
                     res_df.at[s, day_label] = "休"
                     todays_away.append(s)
                     off_counts[s] += 1
@@ -222,7 +221,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 pool.remove(p) 
                 break
 
-    st.success("シフトが完成しました！")
+    st.success("連勤を抑制したシフトが完成しました！")
     def style_shift(val):
         if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
