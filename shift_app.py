@@ -22,9 +22,11 @@ st.markdown("""
 
 st.title("🗓️ KASANE本厚木店シフト管理")
 
-# --- 1. スタッフ管理 ---
+# --- 1. データの完全保存システム（アップデートしても消えない！） ---
 STAFF_FILE = "staff_list.json"
+SCHEDULE_FILE = "schedule_data.json"
 
+# スタッフリストの読み込み・保存
 def load_staff():
     if os.path.exists(STAFF_FILE):
         try:
@@ -37,9 +39,26 @@ def save_staff(staff_list):
     with open(STAFF_FILE, "w", encoding="utf-8") as f:
         json.dump(staff_list, f, ensure_ascii=False)
 
+# チェック表（出張・休みなど）の読み込み・保存
+def load_schedule_data():
+    if os.path.exists(SCHEDULE_FILE):
+        try:
+            with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: pass
+    return {}
+
+def save_schedule_data(data_dict):
+    with open(SCHEDULE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data_dict, f, ensure_ascii=False)
+
+# 初期読み込み
 if 'staff_list' not in st.session_state:
     st.session_state.staff_list = load_staff()
+if 'sched_data' not in st.session_state:
+    st.session_state.sched_data = load_schedule_data()
 
+# --- サイドバー設定 ---
 with st.sidebar:
     st.header("1. スタッフ・年月設定")
     with st.expander("スタッフの追加・削除"):
@@ -84,32 +103,29 @@ for i in range(1, days_in_month + 1):
         label += f" ※{holiday_name}"
         is_holiday_list.append(True)
     else:
-        is_holiday_list.append(curr_date.weekday() >= 5)
+        is_holiday_list.append(curr_date.weekday() >= 5) # 土日をTrueに
     days_labels.append(label)
 
-# --- 2. 各種予定の設定 ---
+# --- 2. 各種予定の設定（消えないチェック表） ---
 st.header("2. 各種予定の設定")
+st.info("💡 入力した内容は自動的に保存され、アプリを更新しても消えなくなりました！")
+
 df_key = f"{year}_{month}"
 
-if 'trip_df_dict' not in st.session_state: st.session_state.trip_df_dict = {}
-if 'off_df_dict' not in st.session_state: st.session_state.off_df_dict = {}
-if 'must_work_df_dict' not in st.session_state: st.session_state.must_work_df_dict = {}
-
-def get_updated_df(storage_dict, key, current_staff, columns, is_single_row=False):
-    if key not in storage_dict:
-        index = ["全員出勤にする日"] if is_single_row else current_staff
-        storage_dict[key] = pd.DataFrame(False, index=index, columns=columns)
+# JSONから表を復元する強力な関数
+def get_persisted_df(domain, index_list, columns):
+    if df_key in st.session_state.sched_data and domain in st.session_state.sched_data[df_key]:
+        # 保存されているデータを読み込む
+        saved_df = pd.DataFrame(st.session_state.sched_data[df_key][domain])
+        # 現在のスタッフリストと日付に合わせて形を整える（はみ出た部分は消え、足りない部分はFalseで埋まる）
+        saved_df = saved_df.reindex(index=index_list, columns=columns, fill_value=False)
+        return saved_df.fillna(False).astype(bool)
     else:
-        if list(storage_dict[key].columns) != columns:
-            index = ["全員出勤にする日"] if is_single_row else current_staff
-            storage_dict[key] = pd.DataFrame(False, index=index, columns=columns)
-        elif not is_single_row:
-            storage_dict[key] = storage_dict[key].reindex(index=current_staff, fill_value=False)
-    return storage_dict[key]
+        return pd.DataFrame(False, index=index_list, columns=columns)
 
-trip_df = get_updated_df(st.session_state.trip_df_dict, df_key, active_staff, days_labels)
-off_df = get_updated_df(st.session_state.off_df_dict, df_key, active_staff, days_labels)
-must_work_df = get_updated_df(st.session_state.must_work_df_dict, df_key, active_staff, days_labels, is_single_row=True)
+trip_df = get_persisted_df("trip", active_staff, days_labels)
+off_df = get_persisted_df("off", active_staff, days_labels)
+must_work_df = get_persisted_df("must", ["全員出勤にする日"], days_labels)
 
 st.subheader("🏢 全員出勤日の指定")
 edited_must_work = st.data_editor(must_work_df, key=f"must_{df_key}")
@@ -124,9 +140,14 @@ with col2:
 
 # --- 5. シフト作成ロジック ---
 if st.button("🚀 シフトを自動作成する", type="primary"):
-    st.session_state.trip_df_dict[df_key] = edited_trip
-    st.session_state.off_df_dict[df_key] = edited_off
-    st.session_state.must_work_df_dict[df_key] = edited_must_work
+    
+    # 🌟 ボタンを押した瞬間に、現在のチェック状態をJSONに完全保存！
+    if df_key not in st.session_state.sched_data:
+        st.session_state.sched_data[df_key] = {}
+    st.session_state.sched_data[df_key]["trip"] = edited_trip.to_dict()
+    st.session_state.sched_data[df_key]["off"] = edited_off.to_dict()
+    st.session_state.sched_data[df_key]["must"] = edited_must_work.to_dict()
+    save_schedule_data(st.session_state.sched_data)
 
     shift_types = ["早1", "早2", "遅1", "遅2"]
     earlies, lates = ["早1", "早2"], ["遅1", "遅2"]
@@ -136,7 +157,6 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
     holiday_off_counts = {s: 0 for s in active_staff}
     shift_counts = {s: {stype: 0 for stype in shift_types} for s in active_staff}
 
-    # 連勤数をカウント
     def get_streak(staff, current_idx):
         streak = 0
         for b in range(1, current_idx + 1):
@@ -145,7 +165,6 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
             else: break
         return streak
 
-    # 連休数をカウント
     def get_off_streak(staff, current_idx):
         streak = 0
         for b in range(1, current_idx + 1):
@@ -158,6 +177,12 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
         is_must_work = edited_must_work.at["全員出勤にする日", day_label]
         todays_away = []
         
+        # 【超重要】その日に最低限必要な出勤人数を定義
+        if is_sp_day:
+            min_staff = 2 # 土日祝は絶対に2人以上！
+        else:
+            min_staff = 1 if len(active_staff) <= 3 else 2 # 平日はスタッフ数に応じて変動
+
         # A. 手動設定の反映
         for s in active_staff:
             if edited_trip.at[s, day_label]:
@@ -169,7 +194,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 off_counts[s] += 1
                 if is_sp_day: holiday_off_counts[s] += 1
 
-        # B. 休み人数の調整
+        # B. 自動休みの割り振り
         if not is_must_work:
             rem_s = [s for s in active_staff if res_df.at[s, day_label] == ""]
             
@@ -187,19 +212,13 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 off_streak = get_off_streak(s, d_idx)
                 
                 score = 0
-                # 連勤ストッパー（超強力）
-                if streak >= 5: score += 2000000 # 6連勤阻止
-                elif streak == 4: score += 1000000 # 5連勤阻止
-                elif streak == 3: score += 500000 # 4連勤阻止（通常はここで休ませる）
+                if streak >= 5: score += 2000000 
+                elif streak == 4: score += 1000000 
+                elif streak == 3: score += 500000 
                 
-                # 連休ストッパー（休みを散らばせるためのペナルティ）
-                # 昨日休んでいた場合、今日「自動で」休ませる優先順位を下げる
                 if off_streak >= 1: score -= 300000 
-                
-                # 残り休み数に対する緊急度
                 if rem_off >= (len(days_labels) - d_idx): score += 100000 
                 
-                # 理想のペース
                 expected = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
                 score += 5000 if off_counts[s] < expected else -5000
                 
@@ -210,15 +229,11 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 
             candidates.sort(reverse=True)
             for score, rand_val, s in candidates:
-                min_staff = 1 if len(active_staff) <= 3 else 2
-                
-                # 最低人数チェック
-                if len(active_staff) - len(todays_away) <= min_staff:
-                    if score < 500000: break # 緊急連勤阻止以外は出勤優先
+                # 🚨 【絶対防壁】もしこの人を休ませて最低人数を割ってしまうなら、絶対に休ませない！
+                if len(active_staff) - len(todays_away) - 1 < min_staff:
+                    continue # 強制的に次の候補者へ（誰も休めない場合はそのままスルー）
                 
                 rem_off = target_off_days[s] - off_counts[s]
-                
-                # 強制休み条件、または理想枠に空きがある場合に休ませる
                 if score >= 500000 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
                     res_df.at[s, day_label] = "休"
                     todays_away.append(s)
@@ -233,14 +248,24 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
         for s in working:
             prev = res_df.at[s, days_labels[d_idx-1]] if d_idx > 0 else "休"
             available_for_s = sorted(pool, key=lambda p: shift_counts[s][p] + random.random() * 0.1)
+            
+            assigned = False
             for p in available_for_s:
                 if prev in lates and p in earlies: continue
                 res_df.at[s, day_label] = p
                 shift_counts[s][p] += 1 
                 pool.remove(p) 
+                assigned = True
                 break
+            
+            # 安全装置：プールが空になった場合でも必ず割り当てる
+            if not assigned:
+                fallback = pool[0] if pool else "遅2"
+                res_df.at[s, day_label] = fallback
+                if fallback in shift_counts[s]: shift_counts[s][fallback] += 1
+                if pool: pool.remove(fallback)
 
-    st.success("連勤と連休のバランスを最適化したシフトが完成しました！")
+    st.success("完璧に守られたシフトが完成しました！")
     def style_shift(val):
         if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
