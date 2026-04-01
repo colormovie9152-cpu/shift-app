@@ -27,13 +27,11 @@ STAFF_FILE = "staff_list.json"
 SCHEDULE_FILE = "schedule_data.json"
 
 # 🌟🌟🌟 【絶対に消えない初期メンバー設定】 🌟🌟🌟
-# ここを実際のスタッフの名前に書き換えて保存してください。
 DEFAULT_STAFF = [
     "石水マリア", 
     "山崎瑠依", 
     "土江恵", 
-    "大道芽子", 
-
+    "大道芽子"
 ]
 
 def load_staff():
@@ -202,10 +200,10 @@ with col_btn2:
         st.rerun()
 
 with col_btn3:
-    manager_staff = st.selectbox("💪 基本的に4連勤を引き受ける人（救世主）", ["指定なし"] + active_staff)
+    manager_staff = st.selectbox("💪 どうしても必要な「4連勤」を引き受ける人（救世主）", ["指定なし"] + active_staff)
     create_clicked = st.button("🚀 シフトを自動作成する", type="primary", use_container_width=True)
 
-# --- 5. 本物のAIエンジン（平等強制版） ---
+# --- 5. 本物のAIエンジン（完全平等＆店長泥かぶり強制版） ---
 if create_clicked:
     num_days = len(days_labels)
     schedule = {s: [""] * num_days for s in active_staff}
@@ -235,44 +233,59 @@ if create_clicked:
         penalty = 0
         for d in range(num_days):
             working = sum(1 for s in active_staff if sched[s][d] == "") 
-            if working < min_s_arr[d]: penalty += (min_s_arr[d] - working) * 10000000000 
+            if working < min_s_arr[d]: penalty += (min_s_arr[d] - working) * 100000000000 
             if must_work_arr[d]:
                 non_trip = sum(1 for s in active_staff if sched[s][d] != "出張")
-                if working < non_trip: penalty += (non_trip - working) * 10000000000
+                if working < non_trip: penalty += (non_trip - working) * 100000000000
 
+        manager_fours = 0
         normal_fours = []
+        
         for s in active_staff:
             current_work, current_off, four_streaks = 0, 0, 0
             for d in range(num_days):
                 val = sched[s][d]
                 if val in ["休", "出張"]:
                     if current_work == 4: four_streaks += 1
-                    elif current_work >= 5: penalty += 10000000000
+                    elif current_work >= 5: penalty += 100000000000 # 5連勤以上は絶対禁止
                     current_work = 0
                     if val == "休": current_off += 1
                     else: current_off = 0
                 else:
-                    if current_off >= 3: penalty += 10000000000
+                    if current_off >= 3: penalty += 100000000000 # 3連休以上は絶対禁止
                     current_off, current_work = 0, current_work + 1
             if current_work == 4: four_streaks += 1
-            elif current_work >= 5: penalty += 10000000000
-            if current_off >= 3: penalty += 10000000000
+            elif current_work >= 5: penalty += 100000000000
+            if current_off >= 3: penalty += 100000000000
 
-            if s != manager_staff:
-                normal_fours.append(four_streaks)
+            if s == manager_staff:
+                manager_fours = four_streaks
             else:
-                pass
+                normal_fours.append(four_streaks)
 
+        # 🌟🌟🌟【完全平等＆店長泥かぶり絶対ルール】🌟🌟🌟
         if normal_fours:
-            penalty += (max(normal_fours) - min(normal_fours)) * 1000000000
-            penalty += sum(normal_fours) * 100000 
+            f_max = max(normal_fours)
+            f_min = min(normal_fours)
+            
+            # 【絶対ルール1】一般スタッフの4連勤回数は「完全に全員平等」でなければならない
+            if f_max != f_min:
+                penalty += (f_max - f_min) * 100000000000 
+            
+            # 【絶対ルール2】指定した人（救世主）が、一般スタッフより4連勤が少ないことは「ありえない」
+            if manager_staff != "指定なし":
+                if manager_fours < f_max:
+                    penalty += (f_max - manager_fours) * 100000000000
+                    
+            # 一般スタッフ全体の4連勤回数自体をなるべく0に近づける（店長に押し付けるため）
+            penalty += sum(normal_fours) * 10000000 
 
         return penalty
 
     best_overall_schedule = None
     best_overall_penalty = float('inf')
 
-    with st.spinner('AIが計算中...'):
+    with st.spinner('AIが「指定した人が一番多く4連勤を引き受け、他の人は完全平等」になるよう計算中...'):
         for attempt in range(5):
             if best_overall_penalty == 0: break
             current_sched = {s: schedule[s][:] for s in active_staff}
@@ -348,14 +361,17 @@ if f"temp_shift_{df_key}" in st.session_state:
         else: normal_fours_list.append(fours)
 
     best_p = st.session_state.get(f"best_penalty_{df_key}", 0)
-    if best_p >= 100000000: st.error("🚨 ルールを守りきれませんでした。希望休を調整してください。")
-    elif sum(normal_fours_list) > 0: st.warning(f"⚠️ 一般スタッフも全員平等に {normal_fours_list[0]}回 4連勤となりました。")
-    elif m_fours > 0: st.info(f"💡 {manager_staff}さんが4連勤を引き受けてくれました！")
-    else: st.success("✨ 全員4連勤なしの完璧なシフトです！")
+    if best_p >= 100000000000: st.error("🚨 限界突破エラー: 希望休などが多すぎてルールを完全に守りきれませんでした。設定を見直してください。")
+    elif sum(normal_fours_list) > 0: 
+        val = max(normal_fours_list) # 平等になった回数
+        st.warning(f"⚠️ 指定した {manager_staff} さんが【{m_fours}回】引き受けましたがカバーしきれなかったため、残りのスタッフ全員で平等に【{val}回ずつ】4連勤を割り振りました！")
+    elif m_fours > 0: 
+        st.info(f"💡 一般スタッフの4連勤は0回です！ 指定された {manager_staff} さんが優先して【{m_fours}回】引き受けて全てカバーしました。")
+    else: 
+        st.success("✨ 誰一人として4連勤なし！全員0回の完璧で平和なシフトです！")
 
     st.subheader("👀 確認用（色付き）")
     
-    # 🌟 エラーが起きたのはこの部分！安全装置（バージョン判定）を組み込みました！
     if hasattr(temp_shift_df.style, 'map'):
         styled_df = temp_shift_df.style.map(style_shift)
     else:
