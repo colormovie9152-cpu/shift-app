@@ -162,7 +162,7 @@ with col_btn3:
     manager_staff = st.selectbox("💪 どうしても無理な時に「4連勤」を引き受ける人", ["指定なし"] + active_staff)
     create_clicked = st.button("🚀 シフトを自動作成する", type="primary", use_container_width=True)
 
-# --- 5. 本物のAIエンジン（不屈のマルチスタート方式） ---
+# --- 5. 本物のAIエンジン（バランス平準化・強制2〜3連勤版） ---
 if create_clicked:
     num_days = len(days_labels)
     
@@ -188,7 +188,7 @@ if create_clicked:
                 non_trip = sum(1 for s in active_staff if sched[s][d] != "出張")
                 if working < non_trip: penalty += (non_trip - working) * 100000000
 
-        # 【絶対ルール2】連勤・連休
+        # 【絶対ルール2 ＆ 🌟新・バランス平準化ルール🌟】
         for s in active_staff:
             current_work = 0
             current_off = 0
@@ -202,6 +202,10 @@ if create_clicked:
                     elif current_work >= 5:
                         penalty += current_work * 10000000 # 5連勤絶対禁止
                     
+                    # 🌟 1日だけの「ぽつんと出勤」も少し嫌がるようにして、2〜3連勤を促す
+                    if current_work == 1:
+                        penalty += 5000 
+
                     current_work = 0
                     if val == "休": current_off += 1
                     else: current_off = 0 
@@ -215,36 +219,38 @@ if create_clicked:
                 four_day_streaks += 1
             elif current_work >= 5:
                 penalty += current_work * 10000000
+            if current_work == 1:
+                penalty += 5000
             if current_off >= 3:
                 penalty += current_off * 1000000
 
-            # 🌟 4連勤の超厳格振り分け 🌟
+            # 🌟🌟 4連勤の「徹底排除＆なすりつけ」ロジック 🌟🌟
             if s == manager_staff:
-                pass # 店長は何回4連勤してもペナルティなし！（AIがここに押し付ける）
+                # 店長は1回目は軽微(1万点)、2回目以上で少し重く(10万点)
+                # 他のスタッフより圧倒的にペナルティが軽いため、4連勤を全て引き受ける
+                if four_day_streaks > 0:
+                    penalty += 10000 + (four_day_streaks - 1) * 100000
             else:
-                if four_day_streaks > 1:
-                    penalty += (four_day_streaks - 1) * 500000 # 一般の2回目は超重罪
-                elif four_day_streaks == 1:
-                    penalty += 1000 # 1回目でも微小なペナルティ（できれば店長に押し付ける）
+                # 一般スタッフは「1回目の4連勤から」超重罪（50万点）とし、全力で2〜3連勤にバラす！
+                # 2回目以上は絶対禁止レベル（1000万点）
+                if four_day_streaks > 0:
+                    penalty += 500000 + (four_day_streaks - 1) * 10000000
 
         return penalty
 
     best_overall_schedule = None
     best_overall_penalty = float('inf')
 
-    # 🌟 AIが諦めない！盤面リセットを最大5回（合計20万回）繰り返して完璧を探す 🌟
-    with st.spinner('AIが「絶対にできるはず」という前提で、パズルのリセットと組み直しを何度も繰り返しています...（約5〜10秒）'):
+    with st.spinner('AIが「4連勤の徹底排除」と「美しい2〜3連勤のリズム」を構築中です...（約5〜10秒）'):
         for attempt in range(5): 
-            if best_overall_penalty == 0: break # 完璧が見つかったら即終了
+            if best_overall_penalty == 0: break 
             
-            # まっさらな状態からやり直す
             current_schedule = {s: [""] * num_days for s in active_staff}
             for s in active_staff:
                 for d in range(num_days):
                     if edited_trip.at[s, days_labels[d]]: current_schedule[s][d] = "出張"
                     elif edited_off.at[s, days_labels[d]]: current_schedule[s][d] = "休"
                 
-                # 休みの割り振り（絶対に日数を守る）
                 current_offs = sum(1 for d in range(num_days) if current_schedule[s][d] == "休")
                 needed_offs = target_off_days[s] - current_offs
                 empty_days = [d for d in range(num_days) if current_schedule[s][d] == ""]
@@ -259,7 +265,7 @@ if create_clicked:
             T = 100.0 
             cooling_rate = 0.9995 
 
-            for i in range(40000): # 1回のスタートにつき4万回シャッフル
+            for i in range(40000): 
                 if local_best_penalty == 0: break 
 
                 mutation = random.random()
@@ -310,7 +316,6 @@ if create_clicked:
 
                 T *= cooling_rate
                 
-            # 各リスタートで一番良かったものを、全体のベストとして記録
             if local_best_penalty < best_overall_penalty:
                 best_overall_penalty = local_best_penalty
                 best_overall_schedule = {s: local_best_schedule[s][:] for s in active_staff}
@@ -347,7 +352,6 @@ if create_clicked:
 
     st.session_state[f"temp_shift_{df_key}"] = res_df.to_dict()
     
-    # 🌟 エラーメッセージを撤廃！「できない」とはもう言いません！
     if manager_staff != "指定なし":
         m_streak = 0
         m_fours = 0
@@ -359,15 +363,14 @@ if create_clicked:
                 m_streak += 1
         if m_streak == 4: m_fours += 1
         
-        if m_fours >= 2:
-            st.warning(f"⚠️ 指定通り、{manager_staff} さんに4連勤を【{m_fours}回】引き受けてもらうことで、他の人の連勤を防ぎました！")
+        if m_fours >= 1:
+            st.warning(f"⚠️ お店を回すため、指定通り {manager_staff} さんに4連勤を引き受けてもらい、全体のバランスを整えました！")
 
 # ==========================================
 # 🌟 完成したシフトの表示＆微調整（色付き）
 # ==========================================
 if f"temp_shift_{df_key}" in st.session_state:
-    st.success("限界まで最適化したシフトが完成しました！休み日数は完全に守られています。")
-    st.info("※もし完璧になっていない箇所があれば、表を直接クリックして最後の微調整をお願いします！")
+    st.success("2〜3連勤をベースとした、最もバランスの良いシフトが完成しました！")
     
     def style_shift(val):
         val_str = str(val)
@@ -381,6 +384,8 @@ if f"temp_shift_{df_key}" in st.session_state:
     temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
     
     st.subheader("👀 シフト確認用（完全色付きマップ）")
+    st.write("※休み(ピンク)・早番(黄)・遅番(青)でマスの色を分けています！")
+    
     colored_map_area = st.empty()
 
     st.subheader("✏️ シフト微調整用（ここで直接書き換えできます）")
