@@ -158,12 +158,12 @@ with col_btn2:
             del st.session_state[f"temp_shift_{df_key}"]
         st.rerun()
 
-# --- 5. 新生AIによる「全体最適化」シフト作成ロジック ---
+# --- 5. 本物のAIエンジン（焼きなまし法）による全体最適化ロジック ---
 with col_btn3:
     create_clicked = st.button("🚀 シフトを自動作成する", type="primary", use_container_width=True)
 
 if create_clicked:
-    # ① まず、手動のチェック状態だけをベースとして設定
+    # ① 手動のチェック状態をベースに設定
     schedule = {s: [""] * len(days_labels) for s in active_staff}
     for s in active_staff:
         for d in range(len(days_labels)):
@@ -182,55 +182,78 @@ if create_clicked:
     # ③ シフトの「悪さ（ペナルティ）」を計算する絶対的な審査ルール
     def get_penalty(sched):
         penalty = 0
+        
+        # 【ルール1】お店の最低人数チェック（絶対守る）
         for d in range(len(days_labels)):
-            working = sum(1 for s in active_staff if sched[s][d] == "") # 休・出張以外の「出勤人数」
+            working = sum(1 for s in active_staff if sched[s][d] == "") 
             is_sp = is_holiday_list[d]
             min_s = 2 if is_sp else (1 if len(active_staff) <= 3 else 2)
 
-            # お店の崩壊（最低人数割れ）は絶対NG
-            if working < min_s: penalty += (min_s - working) * 5000000 
-            if working == 0: penalty += 10000000
+            if working < min_s: 
+                penalty += (min_s - working) * 20000000 
             
-            # 全員出勤日に休んでいる人がいたら超特大ペナルティ
             if edited_must_work.at["全員出勤にする日", days_labels[d]]:
                 non_trip = sum(1 for s in active_staff if sched[s][d] != "出張")
-                if working < non_trip: penalty += (non_trip - working) * 5000000
+                if working < non_trip: penalty += (non_trip - working) * 20000000
 
+        # 【ルール2】連勤・連休の超厳格チェック
         for s in active_staff:
-            work_streak = 0
-            off_streak = 0
+            current_work = 0
+            current_off = 0
+            four_day_streaks = 0
             offs_count = 0
+
             for d in range(len(days_labels)):
                 if sched[s][d] == "休":
                     offs_count += 1
-                    off_streak += 1
-                    work_streak = 0
-                    # 🌟 3連休以上は特大ペナルティ（絶対阻止）
-                    if off_streak >= 3: penalty += 1000000 * off_streak 
-                elif sched[s][d] == "出張":
-                    work_streak += 1
-                    off_streak = 0
-                    # 出張も含めて5連勤以上は特大ペナルティ（絶対阻止）
-                    if work_streak >= 5: penalty += 2000000 * work_streak 
-                else: # 通常出勤
-                    work_streak += 1
-                    off_streak = 0
-                    # 🌟 5連勤以上は特大ペナルティ（絶対阻止）
-                    if work_streak >= 5: penalty += 2000000 * work_streak 
+                    
+                    # 休みに入った瞬間、直前の連勤をチェック
+                    if current_work == 4:
+                        four_day_streaks += 1
+                    elif current_work >= 5:
+                        penalty += current_work * 10000000 # 5連勤以上は一発アウト
+                    
+                    current_work = 0
+                    current_off += 1
+                else: # "出張" or ""(仕事)
+                    # 仕事に入った瞬間、直前の連休をチェック
+                    if current_off >= 3:
+                        penalty += current_off * 5000000 # 3連休以上はアウト
+                    
+                    current_off = 0
+                    current_work += 1
+
+            # 月末の最終チェック
+            if current_work == 4:
+                four_day_streaks += 1
+            elif current_work >= 5:
+                penalty += current_work * 10000000
+            if current_off >= 3:
+                penalty += current_off * 5000000
+
+            # 🚨 4連勤が月2回以上あったらアウト！
+            if four_day_streaks > 1:
+                penalty += (four_day_streaks - 1) * 8000000
 
             # 月の休み数が目標とズレているのもNG
             if offs_count != target_off_days[s]:
-                penalty += abs(offs_count - target_off_days[s]) * 1000000
+                penalty += abs(offs_count - target_off_days[s]) * 100000
 
         return penalty
 
-    # ④ AIが裏で10,000回パズルを入れ替えて、ペナルティ0の最強シフトを探し出す
+    # ④ 最適化エンジン（焼きなまし法）で30,000回パズルを解く
     best_schedule = {s: schedule[s][:] for s in active_staff}
     best_penalty = get_penalty(best_schedule)
+    
+    current_schedule = {s: schedule[s][:] for s in active_staff}
+    current_penalty = best_penalty
 
-    with st.spinner('AIが数万通りの組み合わせから、連勤・連休を排除した完璧なパズルを探しています...'):
-        for _ in range(10000): # 1万回のシャッフルトライアル
-            if best_penalty == 0: break # 完璧なシフトが見つかったら終了
+    T = 100.0 # 初期温度
+    cooling_rate = 0.999 # 冷却率
+
+    with st.spinner('AIが「4連勤は月1回まで」「5連勤・3連休は絶対禁止」の超厳格ルールでパズルを解いています...（約3〜5秒）'):
+        for i in range(30000):
+            if best_penalty == 0: break # 完璧なシフトが見つかったら即終了
 
             s1 = random.choice(active_staff)
             d1 = random.randint(0, len(days_labels)-1)
@@ -238,34 +261,47 @@ if create_clicked:
             # 手動で入れた絶対ルールは動かさない
             if edited_trip.at[s1, days_labels[d1]] or edited_off.at[s1, days_labels[d1]]: continue
 
-            mutation = random.choice(["swap_day", "swap_staff", "toggle"])
-            orig_val = best_schedule[s1][d1]
-
-            # ランダムに「休みの位置をずらす」「他の人と入れ替える」を試す
+            mutation = random.choice(["swap_day", "swap_staff"])
+            
             if mutation == "swap_day":
                 d2 = random.randint(0, len(days_labels)-1)
                 if edited_trip.at[s1, days_labels[d2]] or edited_off.at[s1, days_labels[d2]]: continue
-                best_schedule[s1][d1], best_schedule[s1][d2] = best_schedule[s1][d2], best_schedule[s1][d1]
-                p = get_penalty(best_schedule)
-                if p <= best_penalty: best_penalty = p # 良くなったら採用！
-                else: best_schedule[s1][d1], best_schedule[s1][d2] = best_schedule[s1][d2], best_schedule[s1][d1] # ダメなら戻す
+                if current_schedule[s1][d1] == current_schedule[s1][d2]: continue
+                
+                # 自分の中で休日と出勤日を入れ替えてみる
+                current_schedule[s1][d1], current_schedule[s1][d2] = current_schedule[s1][d2], current_schedule[s1][d1]
+                new_penalty = get_penalty(current_schedule)
+                
+                # 良くなった、もしくは確率で悪化を許容する（局所解からの脱出）
+                if new_penalty < current_penalty or random.random() < math.exp((current_penalty - new_penalty) / max(T, 0.1)):
+                    current_penalty = new_penalty
+                    if new_penalty < best_penalty:
+                        best_penalty = new_penalty
+                        best_schedule = {s: current_schedule[s][:] for s in active_staff}
+                else:
+                    current_schedule[s1][d1], current_schedule[s1][d2] = current_schedule[s1][d2], current_schedule[s1][d1] # 戻す
 
             elif mutation == "swap_staff":
                 s2 = random.choice(active_staff)
                 if s1 == s2: continue
                 if edited_trip.at[s2, days_labels[d1]] or edited_off.at[s2, days_labels[d1]]: continue
-                best_schedule[s1][d1], best_schedule[s2][d1] = best_schedule[s2][d1], best_schedule[s1][d1]
-                p = get_penalty(best_schedule)
-                if p <= best_penalty: best_penalty = p
-                else: best_schedule[s1][d1], best_schedule[s2][d1] = best_schedule[s2][d1], best_schedule[s1][d1]
+                if current_schedule[s1][d1] == current_schedule[s2][d1]: continue
+                
+                # 同じ日のAさんとBさんのシフトを入れ替えてみる
+                current_schedule[s1][d1], current_schedule[s2][d1] = current_schedule[s2][d1], current_schedule[s1][d1]
+                new_penalty = get_penalty(current_schedule)
+                
+                if new_penalty < current_penalty or random.random() < math.exp((current_penalty - new_penalty) / max(T, 0.1)):
+                    current_penalty = new_penalty
+                    if new_penalty < best_penalty:
+                        best_penalty = new_penalty
+                        best_schedule = {s: current_schedule[s][:] for s in active_staff}
+                else:
+                    current_schedule[s1][d1], current_schedule[s2][d1] = current_schedule[s2][d1], current_schedule[s1][d1] # 戻す
+            
+            T *= cooling_rate
 
-            elif mutation == "toggle":
-                best_schedule[s1][d1] = "休" if orig_val == "" else ""
-                p = get_penalty(best_schedule)
-                if p <= best_penalty: best_penalty = p
-                else: best_schedule[s1][d1] = orig_val
-
-    # ⑤ 決定した無敵のスケジュール（休・出張）をベースに、早番と遅番を均等に割り振る
+    # ⑤ 決定した無敵のスケジュールをベースに、早番と遅番を均等に割り振る
     res_df = pd.DataFrame.from_dict(best_schedule, orient='index', columns=days_labels)
     
     shift_types = ["早1", "早2", "遅1", "遅2"]
@@ -275,7 +311,7 @@ if create_clicked:
     for d_idx, day_label in enumerate(days_labels):
         working_staff = [s for s in active_staff if res_df.at[s, day_label] == ""]
         random.shuffle(working_staff)
-        pool = shift_types * 3 # シフトの種類を十分に用意
+        pool = shift_types * 3 
         
         for s in working_staff:
             prev = res_df.at[s, days_labels[d_idx-1]] if d_idx > 0 else "休"
@@ -283,7 +319,7 @@ if create_clicked:
             
             assigned = False
             for p in available:
-                if prev in lates and p in earlies: continue # 遅番の翌日の早番は禁止
+                if prev in lates and p in earlies: continue # 遅番翌日の早番は禁止
                 res_df.at[s, day_label] = p
                 shift_counts[s][p] += 1 
                 pool.remove(p) 
@@ -296,12 +332,15 @@ if create_clicked:
                 if pool: pool.remove(fallback)
 
     st.session_state[f"temp_shift_{df_key}"] = res_df.to_dict()
+    
+    if best_penalty > 0:
+        st.warning("⚠️ 希望休や出張が重なりすぎているため、どうしてもルール（4連勤1回まで等）を守りきれない箇所が一部発生しました。")
 
 # ==========================================
 # 🌟 完成したシフトの表示＆微調整（色付き）
 # ==========================================
 if f"temp_shift_{df_key}" in st.session_state:
-    st.success("連勤と連休を排除した、完璧なシフトが完成しました！")
+    st.success("シフトが完成しました！")
     
     def style_shift(val):
         val_str = str(val)
@@ -347,11 +386,27 @@ if f"temp_shift_{df_key}" in st.session_state:
         l1 = sum(edited_shift.loc[s] == "遅1")
         l2 = sum(edited_shift.loc[s] == "遅2")
 
+        # 4連勤以上の回数チェック
+        streak = 0
+        four_streaks = 0
+        five_streaks = 0
+        for d in days_labels:
+            if edited_shift.at[s, d] not in ["休", ""]:
+                streak += 1
+            else:
+                if streak == 4: four_streaks += 1
+                elif streak >= 5: five_streaks += 1
+                streak = 0
+        if streak == 4: four_streaks += 1
+        elif streak >= 5: five_streaks += 1
+
         stats.append({
             "スタッフ": s, 
             "休み(実/目)": f"{off_c}/{target_off_days[s]}", 
             "土日祝休": hol_off_c, 
-            "早1": e1, "早2": e2, "遅1": l1, "遅2": l2
+            "早1": e1, "早2": e2, "遅1": l1, "遅2": l2,
+            "4連勤": f"{four_streaks}回",
+            "5連勤以上": f"{five_streaks}回"
         })
         
     st.table(pd.DataFrame(stats))
