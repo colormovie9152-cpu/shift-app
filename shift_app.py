@@ -191,6 +191,7 @@ if create_clicked:
         is_must_work = edited_must_work.at["全員出勤にする日", day_label]
         todays_away = []
         
+        # 【絶対ルール】土日祝は2人、平日はスタッフ数に応じた最低人数
         min_staff = 2 if is_sp_day else (1 if len(active_staff) <= 3 else 2)
 
         for s in active_staff:
@@ -220,15 +221,20 @@ if create_clicked:
                 off_streak = get_off_streak(s, d_idx)
                 
                 score = 0
-                if streak >= 5: score += 2000000 
-                elif streak == 4: score += 1000000 
-                elif streak == 3: score += 500000 
                 
-                if off_streak >= 1: score -= 300000 
-                if rem_off >= (len(days_labels) - d_idx): score += 100000 
+                # 🌟🌟🌟【連勤・連休の絶対阻止システム】🌟🌟🌟
+                if streak >= 4: score += 10000000 # 5連勤は絶対阻止（優先度MAX）
+                elif streak == 3: score += 100000 # 4連勤もなるべく阻止
                 
+                if off_streak >= 2: score -= 10000000 # 3連休は絶対阻止（強制出勤）
+                elif off_streak == 1: score -= 100000 # 2連休もなるべく阻止
+                
+                # 休み消化の緊急度（これを逃すと休みが余る）
+                if rem_off >= (len(days_labels) - d_idx): score += 50000000 
+                
+                # ペース配分
                 expected = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
-                score += 5000 if off_counts[s] < expected else -5000
+                score += (expected - off_counts[s]) * 5000
                 
                 if is_sp_day:
                     score += (max(holiday_off_counts.values()) - holiday_off_counts[s]) * 2000
@@ -237,10 +243,18 @@ if create_clicked:
                 
             candidates.sort(reverse=True)
             for score, rand_val, s in candidates:
-                if len(active_staff) - len(todays_away) - 1 < min_staff: continue 
+                # 🚨 【絶対防壁】お店の最低人数を割る場合は、絶対にこれ以上休ませない
+                if len(active_staff) - len(todays_away) - 1 < min_staff: 
+                    break 
                 
                 rem_off = target_off_days[s] - off_counts[s]
-                if score >= 500000 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
+                
+                # 3連休を阻止する（ただし休み消化の緊急事態を除く）
+                if score <= -5000000 and rem_off < (len(days_labels) - d_idx):
+                    continue
+                
+                # 休ませる条件（絶対休むべき、またはペース的に休むべき）
+                if score >= 100000 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
                     res_df.at[s, day_label] = "休"
                     todays_away.append(s)
                     off_counts[s] += 1
@@ -271,42 +285,36 @@ if create_clicked:
     st.session_state[f"temp_shift_{df_key}"] = res_df.to_dict()
 
 # ==========================================
-# 🌟 完成したシフトの表示＆微調整（バグ回避の2段構成！）
+# 🌟 完成したシフトの表示＆微調整（色付き）
 # ==========================================
 if f"temp_shift_{df_key}" in st.session_state:
     st.success("シフトが完成しました！")
     
-    # 🌟 背景色を塗るためのルール（全シフトをわかりやすく色分け！）
     def style_shift(val):
         val_str = str(val)
-        if val_str == '休': return 'background-color: #ffb6c1; color: #555555; font-weight: bold;' # 濃いめのピンク
-        if val_str == '出張': return 'background-color: #e0ffff; color: #555555;' # 水色
-        if '早' in val_str: return 'background-color: #fffac8; color: #555555;' # 薄い黄色（早番）
-        if '遅' in val_str: return 'background-color: #d0ebff; color: #555555;' # 薄い青色（遅番）
+        if val_str == '休': return 'background-color: #ffb6c1; color: #555555; font-weight: bold;'
+        if val_str == '出張': return 'background-color: #e0ffff; color: #555555;'
+        if '早' in val_str: return 'background-color: #fffac8; color: #555555;'
+        if '遅' in val_str: return 'background-color: #d0ebff; color: #555555;'
         return ''
     
-    # セッションからデータを読み込む
     temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"])
     temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
     
-    # 🌟 【絶対に色が消えない】確認専用の色付きマップを上部に配置
     st.subheader("👀 シフト確認用（完全色付きマップ）")
-    st.write("※連勤のカタマリがパッと見で分かるように、休み(ピンク)・早番(黄)・遅番(青)でマスの色を分けています！")
+    st.write("※休み(ピンク)・早番(黄)・遅番(青)でマスの色を分けています！")
     
-    # 表示専用のエリア（プレースホルダー）を確保
     colored_map_area = st.empty()
 
     st.subheader("✏️ シフト微調整用（ここで直接書き換えできます）")
     st.write("※下の表で「早1」などを書き換えると、上の色付きマップも一瞬で連動して書き換わります！")
     
-    # 書き換え用データエディタ（ここで編集した内容が即座に反映される）
     edited_shift = st.data_editor(
         temp_shift_df,
         key=f"temp_shift_editor_{df_key}",
         height=300
     )
     
-    # 🌟 編集後のデータに色を塗って、上のプレースホルダーに表示する！
     if hasattr(edited_shift.style, 'map'):
         styled_df = edited_shift.style.map(style_shift)
     else:
@@ -314,7 +322,6 @@ if f"temp_shift_{df_key}" in st.session_state:
         
     colored_map_area.dataframe(styled_df, height=300, use_container_width=True)
     
-    # 統計の再計算
     st.subheader("📊 最終実績の確認（微調整も反映されます）")
     stats = []
     for s in active_staff:
