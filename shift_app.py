@@ -63,12 +63,11 @@ if 'staff_list' not in st.session_state:
 if 'sched_data' not in st.session_state:
     st.session_state.sched_data = load_schedule_data()
 
-# --- 🌟 新機能：バックアップと復元 ---
+# --- 🌟 バックアップと復元 ---
 with st.sidebar:
     st.header("💾 設定のバックアップと復元")
     st.write("サーバーのリセットでチェックが消えても、これがあれば一瞬で復元できます。")
     
-    # ダウンロード
     all_data = {
         "staff": st.session_state.staff_list,
         "sched": st.session_state.sched_data
@@ -82,7 +81,6 @@ with st.sidebar:
         use_container_width=True
     )
 
-    # アップロード
     uploaded_file = st.file_uploader("📤 保存した設定ファイルを読み込む", type="json")
     if uploaded_file is not None:
         try:
@@ -203,7 +201,7 @@ with col_btn3:
     manager_staff = st.selectbox("💪 どうしても必要な「4連勤」を引き受ける人（救世主）", ["指定なし"] + active_staff)
     create_clicked = st.button("🚀 シフトを自動作成する", type="primary", use_container_width=True)
 
-# --- 5. 本物のAIエンジン（完全平等＆店長泥かぶり強制版） ---
+# --- 5. 本物のAIエンジン（完全平等＆土日祝均等＆店長泥かぶり強制版） ---
 if create_clicked:
     num_days = len(days_labels)
     schedule = {s: [""] * num_days for s in active_staff}
@@ -240,11 +238,19 @@ if create_clicked:
 
         manager_fours = 0
         normal_fours = []
+        hol_offs = [] # 🌟 復活：土日祝の休みカウント
         
         for s in active_staff:
             current_work, current_off, four_streaks = 0, 0, 0
+            h_off = 0
+            
             for d in range(num_days):
                 val = sched[s][d]
+                
+                # 土日祝の休みをカウント
+                if val == "休" and is_sp_arr[d]:
+                    h_off += 1
+                
                 if val in ["休", "出張"]:
                     if current_work == 4: four_streaks += 1
                     elif current_work >= 5: penalty += 100000000000 # 5連勤以上は絶対禁止
@@ -258,6 +264,8 @@ if create_clicked:
             elif current_work >= 5: penalty += 100000000000
             if current_off >= 3: penalty += 100000000000
 
+            hol_offs.append(h_off)
+
             if s == manager_staff:
                 manager_fours = four_streaks
             else:
@@ -268,24 +276,28 @@ if create_clicked:
             f_max = max(normal_fours)
             f_min = min(normal_fours)
             
-            # 【絶対ルール1】一般スタッフの4連勤回数は「完全に全員平等」でなければならない
+            # 【絶対ルール】一般スタッフの4連勤回数は「完全に全員平等」
             if f_max != f_min:
                 penalty += (f_max - f_min) * 100000000000 
             
-            # 【絶対ルール2】指定した人（救世主）が、一般スタッフより4連勤が少ないことは「ありえない」
-            if manager_staff != "指定なし":
-                if manager_fours < f_max:
-                    penalty += (f_max - manager_fours) * 100000000000
+            # 【絶対ルール】指定した人（救世主）が、一般スタッフより4連勤が少ないことは「ありえない」
+            if manager_staff != "指定なし" and manager_fours < f_max:
+                penalty += (f_max - manager_fours) * 100000000000
                     
-            # 一般スタッフ全体の4連勤回数自体をなるべく0に近づける（店長に押し付けるため）
+            # 一般スタッフ全体の4連勤回数自体をなるべく0に近づける
             penalty += sum(normal_fours) * 10000000 
+
+        # 🌟🌟🌟【復活】土日祝の休みも「ある程度」平等に！🌟🌟🌟
+        # 絶対ルール（1000億点）を壊さないよう、500万点のペナルティで調整を促す
+        if hol_offs:
+            penalty += (max(hol_offs) - min(hol_offs)) * 5000000
 
         return penalty
 
     best_overall_schedule = None
     best_overall_penalty = float('inf')
 
-    with st.spinner('AIが「指定した人が一番多く4連勤を引き受け、他の人は完全平等」になるよう計算中...'):
+    with st.spinner('AIが「指定した人が一番多く引き受け、他の人は完全平等」＆「土日祝も均等」になるよう計算中...'):
         for attempt in range(5):
             if best_overall_penalty == 0: break
             current_sched = {s: schedule[s][:] for s in active_staff}
@@ -363,7 +375,7 @@ if f"temp_shift_{df_key}" in st.session_state:
     best_p = st.session_state.get(f"best_penalty_{df_key}", 0)
     if best_p >= 100000000000: st.error("🚨 限界突破エラー: 希望休などが多すぎてルールを完全に守りきれませんでした。設定を見直してください。")
     elif sum(normal_fours_list) > 0: 
-        val = max(normal_fours_list) # 平等になった回数
+        val = max(normal_fours_list)
         st.warning(f"⚠️ 指定した {manager_staff} さんが【{m_fours}回】引き受けましたがカバーしきれなかったため、残りのスタッフ全員で平等に【{val}回ずつ】4連勤を割り振りました！")
     elif m_fours > 0: 
         st.info(f"💡 一般スタッフの4連勤は0回です！ 指定された {manager_staff} さんが優先して【{m_fours}回】引き受けて全てカバーしました。")
@@ -385,6 +397,14 @@ if f"temp_shift_{df_key}" in st.session_state:
     st.subheader("📊 最終実績")
     stats = []
     for s in active_staff:
+        # 🌟🌟 復活：集計用のカウント処理 🌟🌟
+        off_c = sum(edited_shift.loc[s] == "休")
+        hol_off_c = sum(1 for d_idx, day_label in enumerate(days_labels) if is_holiday_list[d_idx] and edited_shift.at[s, day_label] == "休")
+        e1 = sum(edited_shift.loc[s] == "早1")
+        e2 = sum(edited_shift.loc[s] == "早2")
+        l1 = sum(edited_shift.loc[s] == "遅1")
+        l2 = sum(edited_shift.loc[s] == "遅2")
+
         streak, f4, f5 = 0, 0, 0
         for d in days_labels:
             if edited_shift.at[s, d] in ["休", "出張"]:
@@ -394,9 +414,15 @@ if f"temp_shift_{df_key}" in st.session_state:
             else: streak += 1
         if streak == 4: f4 += 1
         elif streak >= 5: f5 += 1
+        
+        # 🌟🌟 復活：土日祝、早番、遅番の表示 🌟🌟
         stats.append({
-            "スタッフ": s, "休み(実/目)": f"{sum(edited_shift.loc[s]=='休')}/{target_off_days[s]}",
-            "4連勤": f"{f4}回", "5連勤以上": f"{f5}回"
+            "スタッフ": s, 
+            "休み(実/目)": f"{off_c}/{target_off_days[s]}", 
+            "土日祝休": hol_off_c, 
+            "早1": e1, "早2": e2, "遅1": l1, "遅2": l2,
+            "4連勤": f"{f4}回", 
+            "5連勤以上": f"{f5}回"
         })
     st.table(pd.DataFrame(stats))
     st.download_button("📥 シフトをCSVで保存", edited_shift.to_csv().encode('utf_8_sig'), f"shift_{year}_{month}.csv", "text/csv")
