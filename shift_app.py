@@ -30,9 +30,10 @@ SCHEDULE_FILE = "schedule_data.json"
 # ここを実際のスタッフの名前に書き換えて保存してください。
 DEFAULT_STAFF = [
     "石水マリア", 
-    "山崎瑠依", 
-    "土江恵", 
-    "大道芽子", 
+    "スタッフB", 
+    "スタッフC", 
+    "スタッフD", 
+    "スタッフE"
 ]
 
 def load_staff():
@@ -260,13 +261,10 @@ if create_clicked:
             if s != manager_staff:
                 normal_fours.append(four_streaks)
             else:
-                # 指定した人の4連勤はむしろ歓迎（ペナルティなし）
                 pass
 
         if normal_fours:
-            # 🌟 平等ルール：一般スタッフ間の回数差は絶対許さない
             penalty += (max(normal_fours) - min(normal_fours)) * 1000000000
-            # 指定外に4連勤があること自体を嫌がるようにし、店長へ誘導する
             penalty += sum(normal_fours) * 100000 
 
         return penalty
@@ -302,7 +300,6 @@ if create_clicked:
                 best_overall_penalty, best_overall_schedule = local_best_p, local_best_s
 
     res_df = pd.DataFrame.from_dict(best_overall_schedule, orient='index', columns=days_labels)
-    # 早番・遅番割り振り
     shift_types = ["早1", "早2", "遅1", "遅2"]
     shift_counts = {s: {stype: 0 for stype in shift_types} for s in active_staff}
     for d_idx, day_label in enumerate(days_labels):
@@ -338,7 +335,6 @@ if f"temp_shift_{df_key}" in st.session_state:
     
     temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"]).reindex(index=active_staff, columns=days_labels, fill_value="")
     
-    # メッセージ判定
     m_fours, normal_fours_list = 0, []
     for s in active_staff:
         streak, fours = 0, 0
@@ -358,7 +354,14 @@ if f"temp_shift_{df_key}" in st.session_state:
     else: st.success("✨ 全員4連勤なしの完璧なシフトです！")
 
     st.subheader("👀 確認用（色付き）")
-    st.dataframe(temp_shift_df.style.applymap(style_shift), height=300, use_container_width=True)
+    
+    # 🌟 エラーが起きたのはこの部分！安全装置（バージョン判定）を組み込みました！
+    if hasattr(temp_shift_df.style, 'map'):
+        styled_df = temp_shift_df.style.map(style_shift)
+    else:
+        styled_df = temp_shift_df.style.applymap(style_shift)
+        
+    st.dataframe(styled_df, height=300, use_container_width=True)
     
     st.subheader("✏️ 微調整用（直接編集OK）")
     edited_shift = st.data_editor(temp_shift_df, key=f"temp_shift_editor_{df_key}", height=300)
