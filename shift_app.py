@@ -22,7 +22,7 @@ st.markdown("""
 
 st.title("🗓️ KASANE本厚木店シフト管理")
 
-# --- 1. データの完全保存システム ---
+# --- 1. データの保存システム ---
 STAFF_FILE = "staff_list.json"
 SCHEDULE_FILE = "schedule_data.json"
 
@@ -105,7 +105,6 @@ for i in range(1, days_in_month + 1):
 
 # --- 2. 各種予定の設定 ---
 st.header("2. 各種予定の設定")
-st.info("💡 チェックを入れた瞬間に自動保存されます！間違えて画面を戻っても消えません。")
 
 df_key = f"{year}_{month}"
 
@@ -132,18 +131,30 @@ with col2:
     st.subheader("👆 希望休（絶対休み）")
     edited_off = st.data_editor(off_df, key=f"off_{df_key}")
 
-# 🌟 【ここが超重要】入力した瞬間にオートセーブ（これで絶対に白紙になりません！）
-if df_key not in st.session_state.sched_data:
-    st.session_state.sched_data[df_key] = {}
-st.session_state.sched_data[df_key]["trip"] = edited_trip.to_dict()
-st.session_state.sched_data[df_key]["off"] = edited_off.to_dict()
-st.session_state.sched_data[df_key]["must"] = edited_must_work.to_dict()
-save_schedule_data(st.session_state.sched_data)
+# ==========================================
+# 🌟 【新機能】任意でチェック内容を記憶させるボタン
+# ==========================================
+st.markdown("---")
+st.subheader("💾 予定の記憶とシフト作成")
+st.write("チェックした内容を記憶させておけば、やり直す時に最初から入力する手間が省けます。")
+
+col_btn1, col_btn2 = st.columns(2)
+
+with col_btn1:
+    if st.button("💾 今のチェック状態をベースとして記憶する"):
+        if df_key not in st.session_state.sched_data:
+            st.session_state.sched_data[df_key] = {}
+        st.session_state.sched_data[df_key]["trip"] = edited_trip.to_dict()
+        st.session_state.sched_data[df_key]["off"] = edited_off.to_dict()
+        st.session_state.sched_data[df_key]["must"] = edited_must_work.to_dict()
+        save_schedule_data(st.session_state.sched_data)
+        st.success("👍 チェック内容を記憶しました！画面を更新してもこの状態からスタートできます。")
 
 # --- 5. シフト作成ロジック ---
-st.warning("⚠️ 新しく『自動作成』を押すと、AIがイチからパズルを組み直すため、一番下の表で手作業で微調整した内容はリセットされます。微調整は最後に行うのがおすすめです！")
+with col_btn2:
+    create_clicked = st.button("🚀 画面の設定でシフトを自動作成する", type="primary")
 
-if st.button("🚀 シフトを自動作成する", type="primary"):
+if create_clicked:
     shift_types = ["早1", "早2", "遅1", "遅2"]
     earlies, lates = ["早1", "早2"], ["遅1", "遅2"]
     
@@ -182,6 +193,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 res_df.at[s, day_label] = "休"
                 todays_away.append(s)
                 off_counts[s] += 1
+                if is_sp_day: holiday_off_counts[s] += 1
 
         if not is_must_work:
             rem_s = [s for s in active_staff if res_df.at[s, day_label] == ""]
@@ -210,6 +222,9 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 expected = ((d_idx + 1) / len(days_labels)) * target_off_days[s]
                 score += 5000 if off_counts[s] < expected else -5000
                 
+                if is_sp_day:
+                    score += (max(holiday_off_counts.values()) - holiday_off_counts[s]) * 2000
+                
                 candidates.append((score, random.random(), s))
                 
             candidates.sort(reverse=True)
@@ -222,6 +237,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                     todays_away.append(s)
                     off_counts[s] += 1
                     current_offs_today += 1
+                    if is_sp_day: holiday_off_counts[s] += 1
 
         working = [s for s in active_staff if res_df.at[s, day_label] == ""]
         random.shuffle(working)
@@ -244,34 +260,29 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 if fallback in shift_counts[s]: shift_counts[s][fallback] += 1
                 if pool: pool.remove(fallback)
 
-    # 生成したシフト結果もファイルに保存！
-    st.session_state.sched_data[df_key]["final_shift"] = res_df.to_dict()
-    save_schedule_data(st.session_state.sched_data)
+    # 🌟 作成した結果は一時的にセッションに保存（ファイルには書き込まないので、リロードで消えます）
+    st.session_state[f"temp_shift_{df_key}"] = res_df.to_dict()
 
 # ==========================================
-# 🌟 完成したシフトの表示＆微調整オートセーブ機能
+# 🌟 完成したシフトの表示＆微調整
 # ==========================================
-if df_key in st.session_state.sched_data and "final_shift" in st.session_state.sched_data[df_key]:
-    st.success("シフトが保存されています！下の表をダブルクリックすると直接修正できます。")
-    st.info("💡 手入力で書き換えると、自動で保存され、集計表もリアルタイムで再計算されます！")
+if f"temp_shift_{df_key}" in st.session_state:
+    st.success("シフトが完成しました！下の表をダブルクリックすると直接修正できます。")
+    st.info("💡 やり直したい場合は、上にある「シフトを自動作成する」をもう一度押すか、ページを更新してください。")
     
     def style_shift(val):
         if val == '休': return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
         return ''
     
-    saved_shift_df = pd.DataFrame(st.session_state.sched_data[df_key]["final_shift"])
-    saved_shift_df = saved_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
+    temp_shift_df = pd.DataFrame(st.session_state[f"temp_shift_{df_key}"])
+    temp_shift_df = temp_shift_df.reindex(index=active_staff, columns=days_labels, fill_value="")
     
     edited_shift = st.data_editor(
-        saved_shift_df.style.applymap(style_shift),
-        key=f"final_shift_editor_{df_key}",
+        temp_shift_df.style.applymap(style_shift),
+        key=f"temp_shift_editor_{df_key}",
         height=400
     )
-    
-    # 手入力で書き換えた内容も上書き保存（オートセーブ）
-    st.session_state.sched_data[df_key]["final_shift"] = edited_shift.to_dict()
-    save_schedule_data(st.session_state.sched_data)
     
     # 統計の再計算
     st.subheader("📊 最終実績の確認（微調整も反映されます）")
