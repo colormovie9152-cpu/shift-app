@@ -6,7 +6,7 @@ import random
 import math
 import jpholiday
 import os
-import json # 🌟データをファイルに保存するための部品を追加
+import json
 
 # --- アプリの設定 ---
 st.set_page_config(layout="wide", page_title="KASANE本厚木店シフト管理", page_icon="🧘‍♀️")
@@ -17,25 +17,23 @@ st.markdown("""
     .stApp { background-color: #fcfcfc; color: #555555; }
     h1, h2, h3 { color: #5d5d4d !important; font-weight: 400 !important; }
     div[data-testid="stDataEditor"] div { cursor: pointer !important; }
-    .stButton > button { border-radius: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🗓️ KASANE本厚木店シフト管理")
 
-# --- 1. スタッフ管理（データの永続化・保存機能） ---
-STAFF_FILE = "staff_list.json" # 保存するファイルの名前
+# --- 1. スタッフ管理（データの保存機能） ---
+STAFF_FILE = "staff_list.json"
 
-# ファイルからスタッフリストを読み込む関数
 def load_staff():
     if os.path.exists(STAFF_FILE):
-        with open(STAFF_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    # ファイルがない場合の初期メンバー
-    # 💡「絶対に消したくない固定メンバー」がいる場合は、ここの名前を直接書き換えるのが一番確実です！
-    return ["スタッフA", "スタッフB", "スタッフC"] 
+        try:
+            with open(STAFF_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return ["スタッフA", "スタッフB", "スタッフC"]
 
-# ファイルにスタッフリストを保存する関数
 def save_staff(staff_list):
     with open(STAFF_FILE, "w", encoding="utf-8") as f:
         json.dump(staff_list, f, ensure_ascii=False)
@@ -46,20 +44,19 @@ if 'staff_list' not in st.session_state:
 with st.sidebar:
     st.header("1. スタッフ・年月設定")
     
-    # スタッフの追加・削除
     with st.expander("スタッフの追加・削除"):
         new_name = st.text_input("追加する名前")
         if st.button("スタッフを追加"):
             if new_name and new_name not in st.session_state.staff_list:
                 st.session_state.staff_list.append(new_name)
-                save_staff(st.session_state.staff_list) # 🌟ファイルに保存して消えないようにする
+                save_staff(st.session_state.staff_list)
                 st.rerun()
         
         del_name = st.selectbox("削除するスタッフ", [""] + st.session_state.staff_list)
         if st.button("スタッフを削除"):
             if del_name in st.session_state.staff_list:
                 st.session_state.staff_list.remove(del_name)
-                save_staff(st.session_state.staff_list) # 🌟ファイルに保存
+                save_staff(st.session_state.staff_list)
                 st.rerun()
 
     st.subheader("メンバーの選択")
@@ -87,50 +84,58 @@ for i in range(1, days_in_month + 1):
     curr_date = date(year, month, i)
     wd = weekday_ja[curr_date.weekday()]
     holiday_name = jpholiday.is_holiday_name(curr_date)
-    
     label = f"{i}日{wd}"
     if holiday_name:
         label += f" ※{holiday_name}"
         is_holiday_list.append(True)
-    elif curr_date.weekday() >= 5: 
-        is_holiday_list.append(True)
     else:
-        is_holiday_list.append(False)
+        is_holiday_list.append(curr_date.weekday() >= 5)
     days_labels.append(label)
 
-# --- 2. 出張・希望休・全員出勤の設定 ---
+# --- 2. 各種予定の設定（データの引き継ぎ機能を強化） ---
 st.header("2. 各種予定の設定")
-st.info("チェックを入れた内容は、シフト作成ボタンを押すまで保存されます。")
+st.info("チェックを入れた内容は、シフト作成ボタンを押すまで保持されます。")
 
-df_key = f"{year}_{month}_{''.join(active_staff)}"
+# 合鍵（キー）からスタッフ名を外し、年月だけにします
+df_key = f"{year}_{month}"
 
-# 各種データの初期化
-for key_name in ['trip_df_dict', 'off_df_dict', 'must_work_df_dict']:
-    if key_name not in st.session_state:
-        st.session_state[key_name] = {}
+if 'trip_df_dict' not in st.session_state: st.session_state.trip_df_dict = {}
+if 'off_df_dict' not in st.session_state: st.session_state.off_df_dict = {}
+if 'must_work_df_dict' not in st.session_state: st.session_state.must_work_df_dict = {}
 
-if df_key not in st.session_state.trip_df_dict:
-    st.session_state.trip_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
-if df_key not in st.session_state.off_df_dict:
-    st.session_state.off_df_dict[df_key] = pd.DataFrame(False, index=active_staff, columns=days_labels)
-if df_key not in st.session_state.must_work_df_dict:
-    st.session_state.must_work_df_dict[df_key] = pd.DataFrame(False, index=["全員出勤にする日"], columns=days_labels)
+# データフレームの初期化・更新（スタッフが増減しても既存のチェックを壊さない）
+def get_updated_df(storage_dict, key, current_staff, columns, is_single_row=False):
+    if key not in storage_dict:
+        index = ["全員出勤にする日"] if is_single_row else current_staff
+        storage_dict[key] = pd.DataFrame(False, index=index, columns=columns)
+    else:
+        # すでにある表の列（日付）が違う場合は作り直し
+        if list(storage_dict[key].columns) != columns:
+            index = ["全員出勤にする日"] if is_single_row else current_staff
+            storage_dict[key] = pd.DataFrame(False, index=index, columns=columns)
+        elif not is_single_row:
+            # スタッフの増減に合わせて行だけを更新（既存のチェックは維持！）
+            storage_dict[key] = storage_dict[key].reindex(index=current_staff, fill_value=False)
+    return storage_dict[key]
 
-# 画面表示
-st.subheader("🏢 全員出勤日の指定（ここにチェックした日は自動の休みが入りません）")
-edited_must_work = st.data_editor(st.session_state.must_work_df_dict[df_key], key=f"must_{df_key}")
+trip_df = get_updated_df(st.session_state.trip_df_dict, df_key, active_staff, days_labels)
+off_df = get_updated_df(st.session_state.off_df_dict, df_key, active_staff, days_labels)
+must_work_df = get_updated_df(st.session_state.must_work_df_dict, df_key, active_staff, days_labels, is_single_row=True)
+
+st.subheader("🏢 全員出勤日の指定（ここをチェックした日は誰も自動で休みになりません）")
+edited_must_work = st.data_editor(must_work_df, key=f"must_{df_key}")
 
 col1, col2 = st.columns(2)
 with col1:
-    st.subheader("✈️ 出張（仕事だけど店舗不在）")
-    edited_trip = st.data_editor(st.session_state.trip_df_dict[df_key], key=f"trip_{df_key}")
+    st.subheader("✈️ 出張（店舗不在）")
+    edited_trip = st.data_editor(trip_df, key=f"trip_{df_key}")
 with col2:
-    st.subheader("👆 希望休（絶対に休み）")
-    edited_off = st.data_editor(st.session_state.off_df_dict[df_key], key=f"off_{df_key}")
+    st.subheader("👆 希望休（絶対休み）")
+    edited_off = st.data_editor(off_df, key=f"off_{df_key}")
 
 # --- 5. シフト作成ロジック ---
 if st.button("🚀 シフトを自動作成する", type="primary"):
-    # 編集内容をセッションに保存
+    # 編集内容を保存
     st.session_state.trip_df_dict[df_key] = edited_trip
     st.session_state.off_df_dict[df_key] = edited_off
     st.session_state.must_work_df_dict[df_key] = edited_must_work
@@ -167,7 +172,7 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 off_counts[s] += 1
                 if is_sp_day: holiday_off_counts[s] += 1
 
-        # B. 休み人数の調整（全員出勤日なら自動休みは入れない）
+        # B. 休み人数の調整（全員出勤日なら自動休みをスキップ）
         if not is_must_work:
             rem_s = [s for s in active_staff if res_df.at[s, day_label] == ""]
             total_rem_offs = sum([max(0, target_off_days[s] - off_counts[s]) for s in active_staff])
@@ -196,7 +201,6 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
                 if len(active_staff) - len(todays_away) <= min_staff: break 
                 
                 rem_off = target_off_days[s] - off_counts[s]
-                streak = get_streak(s, d_idx)
                 if streak >= 3 or (rem_off > 0 and score > 0 and current_offs_today < ideal_offs_today):
                     res_df.at[s, day_label] = "休"
                     todays_away.append(s)
@@ -225,11 +229,11 @@ if st.button("🚀 シフトを自動作成する", type="primary"):
         return ''
     st.dataframe(res_df.style.applymap(style_shift), height=400)
     
-    st.subheader("📊 実績の確認（休み・シフトの均等化）")
+    st.subheader("📊 実績の確認")
     stats = []
     for s in active_staff:
         stats.append({"スタッフ": s, "休み(実/目)": f"{off_counts[s]}/{target_off_days[s]}", "土日祝休": holiday_off_counts[s], "早1": shift_counts[s]["早1"], "早2": shift_counts[s]["早2"], "遅1": shift_counts[s]["遅1"], "遅2": shift_counts[s]["遅2"]})
     st.table(pd.DataFrame(stats))
 
     csv = res_df.to_csv().encode('utf_8_sig')
-    st.download_button("📥 ダウンロード", csv, f"KASANE_shift_{year}_{month}.csv", "text/csv")
+    st.download_button("📥 CSVダウンロード", csv, f"KASANE_shift_{year}_{month}.csv", "text/csv")
