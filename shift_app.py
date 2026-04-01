@@ -33,7 +33,7 @@ DEFAULT_STAFF = [
     "山崎瑠依", 
     "土江恵", 
     "大道芽子", 
-    "スタッフE"
+
 ]
 
 def load_staff():
