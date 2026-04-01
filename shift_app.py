@@ -132,7 +132,7 @@ with col2:
     edited_off = st.data_editor(off_df, key=f"off_{df_key}")
 
 # ==========================================
-# 🌟 【新機能】記憶・リセット・作成の3連ボタン
+# 🌟 記憶・リセット・作成の3連ボタン
 # ==========================================
 st.markdown("---")
 st.subheader("💾 予定の記憶とシフト作成")
@@ -150,14 +150,11 @@ with col_btn1:
         save_schedule_data(st.session_state.sched_data)
         st.success("👍 チェック内容を記憶しました！")
 
-# 🌟 追加：記憶を解除して白紙に戻すボタン
 with col_btn2:
     if st.button("🗑️ 記憶をリセット（白紙に戻す）", use_container_width=True):
-        # 保存データを削除
         if df_key in st.session_state.sched_data:
             del st.session_state.sched_data[df_key]
             save_schedule_data(st.session_state.sched_data)
-        # 画面の表示用データも削除
         if f"temp_shift_{df_key}" in st.session_state:
             del st.session_state[f"temp_shift_{df_key}"]
         st.rerun()
@@ -281,9 +278,9 @@ if f"temp_shift_{df_key}" in st.session_state:
     st.success("シフトが完成しました！下の表をダブルクリックすると直接修正できます。")
     st.info("💡 やり直したい場合は、上にある「シフトを自動作成する」をもう一度押すか、ページを更新してください。")
     
-    # 🌟 変更点：「休」の色を主張しすぎないオシャレなグレーに変更！
+    # 🌟 変更点：「休」の色を上品なダスティーピンク（くすみベージュ・ピンク系）に変更！太字で見やすく！
     def style_shift(val):
-        if val == '休': return 'background-color: #e8e6e1; color: #888888;' # KASANEに合わせたシックなグレー
+        if val == '休': return 'background-color: #f4ecec; color: #8c6b6b; font-weight: bold;'
         if val == '出張': return 'background-color: #e6fffa; color: #006666;'
         return ''
     
