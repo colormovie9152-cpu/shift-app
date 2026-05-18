@@ -322,11 +322,12 @@ if create_clicked:
         early_candidates = [s for s in working if s not in yesterday_late]
         if not early_candidates: early_candidates = working # 全員昨日遅番なら仕方ない
         
-        # 早番カウントが少ない人を優先
-        s_early = min(early_candidates, key=lambda s: shift_counts[s]["早1"] + shift_counts[s]["早2"])
-        res_df.at[s_early, day_label] = random.choice(shift_types_early)
-        shift_counts[s_early][res_df.at[s_early, day_label]] += 1
-        assigned_today.add(s_early)
+        if early_candidates: # 🌟 ここで誰もいない場合はエラーを出さずにスキップ！
+            # 早番カウントが少ない人を優先
+            s_early = min(early_candidates, key=lambda s: shift_counts[s]["早1"] + shift_counts[s]["早2"])
+            res_df.at[s_early, day_label] = random.choice(shift_types_early)
+            shift_counts[s_early][res_df.at[s_early, day_label]] += 1
+            assigned_today.add(s_early)
 
         # 3. 【絶対ルール】次に遅番を一人決める (残った人から)
         late_candidates = [s for s in working if s not in assigned_today]
